@@ -1,7 +1,9 @@
 //! This module provides the functionality to cache the aggregated results fetched and aggregated
 //! from the upstream search engines in a json format.
 
-use super::error::CacheError;
+use super::{error::CacheError, Cacher};
+use crate::parser::Config;
+use crate::models::aggregation::SearchResults;
 use error_stack::Report;
 use futures::stream::FuturesUnordered;
 use redis::{
@@ -35,9 +37,9 @@ impl RedisCache {
     ///
     /// * `redis_connection_url` - It takes the redis Connection url address.
     /// * `pool_size` - It takes the size of the connection pool (in other words the number of
-    /// connections that should be stored in the pool).
+    ///   connections that should be stored in the pool).
     /// * `cache_ttl` - It takes the the time to live for cached results to live in the redis
-    /// server.
+    ///   server.
     ///
     /// # Error
     ///
@@ -187,5 +189,60 @@ impl RedisCache {
                 Ok(_) => return Ok(()),
             }
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl Cacher for RedisCache {
+    async fn build(config: &Config) -> Self {
+        log::info!(
+            "Initialising redis cache. Listening to {}",
+            &config.redis_url
+        );
+        RedisCache::new(&config.redis_url, 5, config.cache_expiry_time)
+            .await
+            .expect("Redis cache configured")
+    }
+
+    async fn cached_results(&mut self, url: &str) -> Result<SearchResults, Report<CacheError>> {
+        use base64::Engine;
+        let hashed_url_string: &str = &self.hash_url(url);
+        let base64_string = self.cached_json(hashed_url_string).await?;
+
+        let bytes = base64::engine::general_purpose::STANDARD_NO_PAD
+            .decode(base64_string)
+            .map_err(|_| CacheError::Base64DecodingOrEncodingError)?;
+        self.post_process_search_results(bytes).await
+    }
+
+    async fn cache_results(
+        &mut self,
+        search_results: &[SearchResults],
+        urls: &[String],
+    ) -> Result<(), Report<CacheError>> {
+        use base64::Engine;
+
+        // size of search_results is expected to be equal to size of urls -> key/value pairs  for cache;
+        let search_results_len = search_results.len();
+
+        let mut bytes = Vec::with_capacity(search_results_len);
+
+        for result in search_results {
+            let processed = self.pre_process_search_results(result).await?;
+            bytes.push(processed);
+        }
+
+        let base64_strings = bytes
+            .iter()
+            .map(|bytes_vec| base64::engine::general_purpose::STANDARD_NO_PAD.encode(bytes_vec));
+
+        let mut hashed_url_strings = Vec::with_capacity(search_results_len);
+
+        for url in urls {
+            let hash = self.hash_url(url);
+            hashed_url_strings.push(hash);
+        }
+        self.cache_json(base64_strings, hashed_url_strings.into_iter())
+            .await
     }
 }
