@@ -1,15 +1,15 @@
 //! This module handles the search route of the search engine website.
 
 use crate::{
-    cache::cacher::SharedCache,
-    config::parser::Config,
+    aggregator::aggregate,
+    cache::SharedCache,
     handler::{file_path, FileType},
     models::{
-        aggregation_models::SearchResults,
-        engine_models::EngineHandler,
-        server_models::{self, SearchParams},
+        aggregation::SearchResults,
+        engine::EngineHandler,
+        search_route::{self, SearchParams},
     },
-    results::aggregator::aggregate,
+    parser::Config,
 };
 use actix_web::{get, http::header::ContentType, web, HttpRequest, HttpResponse};
 use itertools::Itertools;
@@ -54,10 +54,10 @@ pub async fn search(
             let cookie = req.cookie("appCookie");
 
             // Get search settings using the user's cookie or from the server's config
-            let mut search_settings: server_models::Cookie<'_> = cookie
+            let mut search_settings: search_route::Cookie<'_> = cookie
                 .and_then(|cookie_value| serde_json::from_str(cookie_value.value()).ok())
                 .unwrap_or_else(|| {
-                    server_models::Cookie::build(
+                    search_route::Cookie::build(
                         &config.style,
                         config
                             .upstream_search_engines
@@ -161,7 +161,7 @@ async fn results(
     cache: &'static SharedCache,
     query: &str,
     page: u32,
-    search_settings: &server_models::Cookie<'_>,
+    search_settings: &search_route::Cookie<'_>,
 ) -> Result<(SearchResults, String, bool), Box<dyn std::error::Error>> {
     // eagerly parse cookie value to evaluate safe search level
     let safe_search_level = search_settings.safe_search_level;
