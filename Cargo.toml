@@ -6,12 +6,6 @@ description = "An open-source alternative to Searx that provides clean, ad-free,
 repository = "https://github.com/neon-mmd/websurfx"
 license = "AGPL-3.0"
 
-[[bin]]
-name = "websurfx"
-test = true
-bench = false
-path = "src/bin/websurfx.rs"
-
 [dependencies]
 reqwest = { version = "0.12.5", default-features = false, features = [
     "rustls-tls",
@@ -61,7 +55,6 @@ regex = { version = "1.11.1", features = ["perf"], default-features = false }
 futures = { version = "0.3.31", default-features = false, features = ["alloc"] }
 dhat = { version = "0.3.2", optional = true, default-features = false }
 mimalloc = { version = "0.1.43", default-features = false }
-async-once-cell = { version = "0.5.3", default-features = false }
 actix-governor = { version = "0.7.0", default-features = false }
 moka = { version = "0.12.8", optional = true, default-features = false, features = [
     "future",
@@ -117,8 +110,7 @@ rpath = false
 
 [profile.release]
 opt-level = 3
-debug = false # This should only be commented when testing with dhat profiler
-# debug = 1 # This should only be uncommented when testing with dhat profiler
+debug = false
 split-debuginfo = '...'
 debug-assertions = false
 overflow-checks = false
@@ -128,6 +120,10 @@ incremental = false
 codegen-units = 1
 rpath = false
 strip = "symbols"
+
+[profile.debug]
+inherits = "release"
+debug = true
 
 [profile.bsr1]
 inherits = "release"
