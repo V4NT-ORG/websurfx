@@ -7,8 +7,8 @@ use reqwest::header::HeaderMap;
 use reqwest::Client;
 use scraper::Html;
 
-use crate::models::aggregation_models::SearchResult;
-use crate::models::engine_models::{EngineError, SearchEngine};
+use crate::models::aggregation::SearchResult;
+use crate::models::engine::{EngineError, SearchEngine};
 
 use error_stack::{Report, Result, ResultExt};
 

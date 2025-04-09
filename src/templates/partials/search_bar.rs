@@ -2,7 +2,7 @@
 
 use maud::{html, Markup, PreEscaped};
 
-use crate::{models::aggregation_models::EngineErrorInfo, templates::partials::bar::bar};
+use crate::{models::aggregation::EngineErrorInfo, templates::partials::bar::bar};
 
 /// A constant holding the named safe search level options for the corresponding values 0, 1 and 2.
 const SAFE_SEARCH_LEVELS_NAME: [&str; 3] = ["None", "Low", "Moderate"];

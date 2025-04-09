@@ -5,18 +5,17 @@
 #![deny(missing_docs, clippy::missing_docs_in_private_items, clippy::perf)]
 #![warn(clippy::cognitive_complexity, rust_2018_idioms)]
 
-pub mod cache;
-pub mod config;
-pub mod engines;
-pub mod handler;
-pub mod models;
-pub mod results;
-pub mod server;
+mod aggregator;
+mod cache;
+mod engines;
+mod handler;
+mod models;
+pub mod parser;
+mod routes;
 pub mod templates;
+mod user_agent;
 
-use std::{net::TcpListener, sync::OnceLock, time::Duration};
-
-use crate::server::router;
+use std::{net::TcpListener, time::Duration};
 
 use actix_cors::Cors;
 use actix_files as fs;
@@ -27,12 +26,13 @@ use actix_web::{
     middleware::{Compress, Logger},
     web, App, HttpServer,
 };
-use cache::cacher::{Cacher, SharedCache};
-use config::parser::Config;
+use cache::SharedCache;
 use handler::{file_path, FileType};
+use parser::Config;
+use tokio::sync::OnceCell;
 
 /// A static constant for holding the cache struct.
-static SHARED_CACHE: OnceLock<SharedCache> = OnceLock::new();
+static SHARED_CACHE: OnceCell<SharedCache> = OnceCell::const_new();
 
 /// Runs the web server on the provided TCP listener and returns a `Server` instance.
 ///
@@ -62,14 +62,13 @@ static SHARED_CACHE: OnceLock<SharedCache> = OnceLock::new();
 ///     let server = run(listener,&config,cache).expect("Failed to start server");
 /// }
 /// ```
-pub fn run(
-    listener: TcpListener,
-    config: &'static Config,
-    cache: impl Cacher + 'static,
-) -> std::io::Result<Server> {
+pub async fn run(listener: TcpListener, config: &'static Config) -> std::io::Result<Server> {
     let public_folder_path: &str = file_path(FileType::Theme)?;
 
-    let cache = SHARED_CACHE.get_or_init(|| SharedCache::new(cache));
+    let cache = SHARED_CACHE
+        .get_or_try_init(|| SharedCache::new(config))
+        .await
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err.to_string()))?;
 
     let server = HttpServer::new(move || {
         let cors: Cors = Cors::default()
@@ -105,12 +104,12 @@ pub fn run(
                 fs::Files::new("/images", format!("{}/images", public_folder_path))
                     .show_files_listing(),
             )
-            .service(router::robots_data) // robots.txt
-            .service(router::index) // index page
-            .service(server::routes::search::search) // search page
-            .service(router::about) // about page
-            .service(router::settings) // settings page
-            .default_service(web::route().to(router::not_found)) // error page
+            .service(routes::robots_data) // robots.txt
+            .service(routes::index) // index page
+            .service(routes::search::search) // search page
+            .service(routes::about) // about page
+            .service(routes::settings) // settings page
+            .default_service(web::route().to(routes::not_found)) // error page
     })
     .workers(config.threads as usize)
     // Set the keep-alive timer for client connections
