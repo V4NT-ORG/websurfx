@@ -48,7 +48,7 @@ static SHARED_CACHE: OnceCell<SharedCache> = OnceCell::const_new();
 ///
 /// ```rust
 /// use std::{net::TcpListener, sync::OnceLock};
-/// use websurfx::{config::parser::Config, run, cache::cacher::create_cache};
+/// use websurfx::{parser::Config, run};
 ///
 /// /// A static constant for holding the parsed config.
 /// static CONFIG: OnceLock<Config> = OnceLock::new();
@@ -58,8 +58,7 @@ static SHARED_CACHE: OnceCell<SharedCache> = OnceCell::const_new();
 ///     // Initialize the parsed config globally.
 ///     let config = CONFIG.get_or_init(|| Config::parse(true).unwrap());
 ///     let listener = TcpListener::bind("127.0.0.1:8080").expect("Failed to bind address");
-///     let cache = create_cache(config).await;
-///     let server = run(listener,&config,cache).expect("Failed to start server");
+///     let server = run(listener,&config).await.expect("Failed to start server");
 /// }
 /// ```
 pub async fn run(listener: TcpListener, config: &'static Config) -> std::io::Result<Server> {
