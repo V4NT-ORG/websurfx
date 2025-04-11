@@ -1,10 +1,9 @@
 //! This module provides the models to parse cookies and search parameters from the search
 //! engine website.
-use std::borrow::Cow;
-
+//!
+use super::parser::Style;
 use serde::{Deserialize, Serialize};
-
-use super::parser_models::Style;
+use std::borrow::Cow;
 
 /// A named struct which deserializes all the user provided search parameters and stores them.
 #[derive(Deserialize)]

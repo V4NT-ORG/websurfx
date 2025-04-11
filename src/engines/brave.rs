@@ -7,10 +7,10 @@ use std::collections::HashMap;
 use reqwest::{header::HeaderMap, Client};
 use scraper::Html;
 
-use crate::models::aggregation_models::SearchResult;
+use crate::models::aggregation::SearchResult;
 use error_stack::{Report, Result, ResultExt};
 
-use crate::models::engine_models::{EngineError, SearchEngine};
+use crate::models::engine::{EngineError, SearchEngine};
 
 use super::search_result_parser::SearchResultParser;
 

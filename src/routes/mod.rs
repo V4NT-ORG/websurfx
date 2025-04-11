@@ -3,11 +3,14 @@
 //! when requested.
 
 use crate::{
-    config::parser::Config,
     handler::{file_path, FileType},
+    parser::Config,
 };
 use actix_web::{get, http::header::ContentType, web, HttpRequest, HttpResponse};
 use tokio::fs::read_to_string;
+
+pub mod export_import;
+pub mod search;
 
 /// Handles the route of index page or main page of the `websurfx` meta search engine website.
 #[get("/")]

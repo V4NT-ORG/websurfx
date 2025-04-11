@@ -1,7 +1,7 @@
 //! This module provides the error enum to handle different errors associated while requesting data from
 //! the upstream search engines with the search query provided by the user.
 
-use super::aggregation_models::SearchResult;
+use super::aggregation::SearchResult;
 use error_stack::{Report, Result, ResultExt};
 use reqwest::Client;
 use std::fmt;

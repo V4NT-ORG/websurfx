@@ -8,14 +8,14 @@ use reqwest::header::HeaderMap;
 use reqwest::Client;
 use scraper::Html;
 
-use crate::models::aggregation_models::SearchResult;
+use crate::models::aggregation::SearchResult;
 
-use crate::models::engine_models::{EngineError, SearchEngine};
+use crate::models::engine::{EngineError, SearchEngine};
 
 use error_stack::{Report, Result, ResultExt};
 
-use super::common::{build_cookie, build_query};
 use super::search_result_parser::SearchResultParser;
+use super::{build_cookie, build_query};
 
 /// A new Mojeek engine type defined in-order to implement the `SearchEngine` trait which allows to
 /// reduce code duplication as well as allows to create vector of different search engines easily.

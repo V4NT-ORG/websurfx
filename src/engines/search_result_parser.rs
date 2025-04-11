@@ -1,6 +1,6 @@
 //! This modules provides helper functionalities for parsing a html document into internal SearchResult.
 
-use crate::models::{aggregation_models::SearchResult, engine_models::EngineError};
+use crate::models::{aggregation::SearchResult, engine::EngineError};
 use error_stack::{Report, Result};
 use scraper::{html::Select, ElementRef, Html, Selector};
 

@@ -1,7 +1,7 @@
 //! This module provides public models for handling, storing and serializing of search results
 //! data scraped from the upstream search engines.
 
-use super::engine_models::EngineError;
+use super::engine::EngineError;
 use serde::{Deserialize, Serialize};
 #[cfg(any(
     feature = "use-synonyms-search",
@@ -49,13 +49,10 @@ impl SearchResult {
         }
     }
     /// calculates and update the relevance score of the current search.
-
+    ///
     /// # Arguments
     ///
     /// * query -  the query string  used to obtain the results
-    ///
-    ///
-
     pub fn calculate_relevance(&mut self, query: &str) {
         use stop_words::{get, LANGUAGE};
         // when language settings can change to any of the ones supported on this crate: https://docs.rs/crate/stop-words/0.8.0

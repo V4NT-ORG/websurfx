@@ -6,7 +6,7 @@
 use mimalloc::MiMalloc;
 
 use std::{net::TcpListener, sync::OnceLock};
-use websurfx::{cache::cacher::create_cache, config::parser::Config, run};
+use websurfx::{parser::Config, run};
 
 /// A dhat heap memory profiler
 #[cfg(feature = "dhat-heap")]
@@ -35,8 +35,6 @@ async fn main() -> std::io::Result<()> {
     // Initialize the parsed config globally.
     let config = CONFIG.get_or_init(|| Config::parse(false).unwrap());
 
-    let cache = create_cache(config).await;
-
     log::info!(
         "started server on port {} and IP {}",
         config.port,
@@ -50,5 +48,5 @@ async fn main() -> std::io::Result<()> {
 
     let listener = TcpListener::bind((config.binding_ip.as_str(), config.port))?;
 
-    run(listener, config, cache)?.await
+    run(listener, config).await?.await
 }

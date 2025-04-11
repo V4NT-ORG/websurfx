@@ -3,7 +3,7 @@
 use maud::{html, Markup, PreEscaped};
 
 use crate::{
-    models::aggregation_models::SearchResults,
+    models::aggregation::SearchResults,
     templates::partials::{footer::footer, header::header, search_bar::search_bar},
 };
 

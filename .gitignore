@@ -1,3 +1,4 @@
+.git/
 .vscode
 /target
 dhat-heap.json
@@ -5,4 +6,3 @@ dump.rdb
 megalinter-reports/
 package-lock.json
 package.json
-result

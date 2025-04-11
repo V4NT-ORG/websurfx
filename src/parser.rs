@@ -3,7 +3,7 @@
 
 use crate::handler::{file_path, FileType};
 
-use crate::models::parser_models::{AggregatorConfig, RateLimiter, Style};
+use crate::models::parser::{AggregatorConfig, RateLimiter, Style};
 use log::LevelFilter;
 use mlua::Lua;
 use reqwest::Proxy;

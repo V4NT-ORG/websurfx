@@ -2,12 +2,12 @@
 //! search engines and then removes duplicate results.
 
 use super::user_agent::random_user_agent;
-use crate::config::parser::Config;
 use crate::handler::{file_path, FileType};
 use crate::models::{
-    aggregation_models::{EngineErrorInfo, SearchResult, SearchResults},
-    engine_models::{EngineError, EngineHandler},
+    aggregation::{EngineErrorInfo, SearchResult, SearchResults},
+    engine::{EngineError, EngineHandler},
 };
+use crate::parser::Config;
 
 use error_stack::Report;
 use futures::stream::FuturesUnordered;
@@ -25,7 +25,6 @@ use tokio::{
 static CLIENT: std::sync::OnceLock<Client> = std::sync::OnceLock::new();
 
 /// Aliases for long type annotations
-
 type FutureVec =
     FuturesUnordered<JoinHandle<Result<Vec<(String, SearchResult)>, Report<EngineError>>>>;
 

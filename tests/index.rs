@@ -1,6 +1,6 @@
 use std::{net::TcpListener, sync::OnceLock};
 
-use websurfx::{config::parser::Config, run, templates::views};
+use websurfx::{parser::Config, run, templates::views};
 
 /// A static constant for holding the parsed config.
 static CONFIG: OnceLock<Config> = OnceLock::new();
@@ -11,8 +11,7 @@ async fn spawn_app() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind random port");
     let port = listener.local_addr().unwrap().port();
     let config = CONFIG.get_or_init(|| Config::parse(false).unwrap());
-    let cache = websurfx::cache::cacher::create_cache(config).await;
-    let server = run(listener, config, cache).expect("Failed to bind address");
+    let server = run(listener, config).await.expect("Failed to bind address");
 
     tokio::spawn(server);
     format!("http://127.0.0.1:{}/", port)

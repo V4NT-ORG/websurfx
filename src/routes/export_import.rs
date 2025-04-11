@@ -2,7 +2,7 @@
 
 use crate::{
     handler::{file_path, FileType},
-    models::{self, server_models},
+    models::{self, search_route},
     Config,
 };
 use actix_multipart::form::{tempfile::TempFile, MultipartForm};
@@ -25,15 +25,15 @@ use tokio::fs::read_dir;
 /// # Arguments
 ///
 /// * `style_type` - It takes the style type of the values `theme` and `colorscheme` as an
-/// argument.
+///   argument.
 ///
 /// # Error
 ///
 /// Returns a list of colorscheme/theme names as a vector of tuple strings on success otherwise
 /// returns a standard error message.
-async fn style_option_list<'a>(
-    style_type: &'a str,
-) -> Result<Box<[Cow<'a, str>]>, Box<dyn std::error::Error>> {
+async fn style_option_list(
+    style_type: &str,
+) -> Result<Box<[Cow<'_, str>]>, Box<dyn std::error::Error>> {
     let mut style_options = Vec::new();
     let mut dir = read_dir(format!(
         "{}static/{}/",
@@ -65,7 +65,7 @@ async fn style_option_list<'a>(
 /// returns a standard error message on failure otherwise it returns the unit type.
 async fn sanitize(
     config: web::Data<&'static Config>,
-    setting_value: &mut models::server_models::Cookie<'_>,
+    setting_value: &mut models::search_route::Cookie<'_>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Check whether the theme, colorscheme and animation option is valid by matching it against
     // the available option list. If the option provided by the user via the JSON file is invalid
@@ -140,7 +140,7 @@ pub async fn set_settings(
                     let mut data = String::new();
                     form.file.file.read_to_string(&mut data).unwrap();
 
-                    let mut unsanitized_json_data: models::server_models::Cookie<'_> =
+                    let mut unsanitized_json_data: models::search_route::Cookie<'_> =
                         serde_json::from_str(&data)?;
 
                     sanitize(config, &mut unsanitized_json_data).await?;
@@ -173,11 +173,11 @@ pub async fn download(
     let cookie = req.cookie("appCookie");
 
     // Get search settings using the user's cookie or from the server's config
-    let preferences: server_models::Cookie<'_> = cookie
+    let preferences: search_route::Cookie<'_> = cookie
         .as_ref()
         .and_then(|cookie_value| serde_json::from_str(cookie_value.value()).ok())
         .unwrap_or_else(|| {
-            server_models::Cookie::build(
+            search_route::Cookie::build(
                 &config.style,
                 config
                     .upstream_search_engines
