@@ -2,7 +2,6 @@
 
 use crate::{
     aggregator::aggregate,
-    cache::SharedCache,
     handler::{file_path, FileType},
     models::{
         aggregation::SearchResults,
@@ -10,17 +9,27 @@ use crate::{
         search_route::{self, SearchParams},
     },
     parser::Config,
+    user_agent::random_user_agent,
 };
+
+#[cfg(any(feature = "redis-cache", feature = "memory-cache"))]
+use {crate::cache::SharedCache, tokio::sync::OnceCell};
+
 use actix_web::{get, http::header::ContentType, web, HttpRequest, HttpResponse};
-use itertools::Itertools;
 use regex::Regex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{borrow::Cow, time::Duration};
 use tokio::{
     fs::File,
     io::{AsyncBufReadExt, BufReader},
-    join,
 };
+
+#[cfg(any(feature = "redis-cache", feature = "memory-cache"))]
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+
+/// A static constant for holding the cache struct.
+#[cfg(any(feature = "redis-cache", feature = "memory-cache"))]
+static SHARED_CACHE: OnceCell<SharedCache> = OnceCell::const_new();
 
 /// Handles the route of search page of the `websurfx` meta search engine website and it takes
 /// two search url parameters `q` and `page` where `page` parameter is optional.
@@ -40,106 +49,163 @@ use tokio::{
 pub async fn search(
     req: HttpRequest,
     config: web::Data<&'static Config>,
-    cache: web::Data<&'static SharedCache>,
 ) -> Result<HttpResponse, Box<dyn std::error::Error>> {
+    #[cfg(any(feature = "redis-cache", feature = "memory-cache"))]
+    let cache = SHARED_CACHE
+        .get_or_try_init(|| SharedCache::new(&config))
+        .await?;
+
     let params = web::Query::<SearchParams>::from_query(req.query_string())?;
-    match &params.q {
-        Some(query) => {
-            if query.trim().is_empty() {
-                return Ok(HttpResponse::TemporaryRedirect()
-                    .insert_header(("location", "/"))
-                    .finish());
-            }
 
-            let cookie = req.cookie("appCookie");
+    if let Some(query) = &params.q {
+        if query.trim().is_empty() {
+            return Ok(HttpResponse::TemporaryRedirect()
+                .insert_header(("location", "/"))
+                .finish());
+        }
 
-            // Get search settings using the user's cookie or from the server's config
-            let mut search_settings: search_route::Cookie<'_> = cookie
-                .as_ref()
-                .and_then(|cookie_value| serde_json::from_str(cookie_value.value()).ok())
-                .unwrap_or_else(|| {
-                    search_route::Cookie::build(
-                        &config.style,
-                        config
-                            .upstream_search_engines
-                            .iter()
-                            .filter_map(|(engine, enabled)| {
-                                enabled.then_some(Cow::Borrowed(engine.as_str()))
-                            })
-                            .collect(),
-                        config.safe_search,
-                    )
-                });
+        let cookie = req.cookie("appCookie");
 
-            search_settings.safe_search_level = get_safesearch_level(
-                params.safesearch,
-                search_settings.safe_search_level,
-                config.safe_search,
-            );
+        // Get search settings using the user's cookie or from the server's config
+        let mut search_settings: search_route::Cookie<'_> = cookie
+            .as_ref()
+            .and_then(|cookie_value| serde_json::from_str(cookie_value.value()).ok())
+            .unwrap_or_else(|| {
+                search_route::Cookie::build(
+                    &config.style,
+                    config
+                        .upstream_search_engines
+                        .iter()
+                        .filter_map(|(engine, enabled)| {
+                            enabled.then_some(Cow::Borrowed(engine.as_str()))
+                        })
+                        .collect(),
+                    config.safe_search,
+                )
+            });
 
-            // Closure wrapping the results function capturing local references
-            let get_results = |page| results(&config, &cache, query, page, &search_settings);
+        search_settings.safe_search_level = get_safesearch_level(
+            params.safesearch,
+            search_settings.safe_search_level,
+            config.safe_search,
+        );
 
-            // .max(1) makes sure that the page >= 0.
-            let page = params.page.unwrap_or(1).max(1) - 1;
+        // Add a random delay before making the request.
+        if config.aggregator.random_delay || config.debug {
+            let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.subsec_nanos();
+            let delay = nanos % 10 + 1;
+            tokio::time::sleep(Duration::from_secs(delay as u64)).await;
+        }
+
+        let user_agent: &str = random_user_agent(config.threads).await?;
+
+        // .max(1) makes sure that the page >= 0.
+        let page = params.page.unwrap_or(1).max(1) - 1;
+
+        let current_results: SearchResults;
+
+        #[cfg(any(feature = "redis-cache", feature = "memory-cache"))]
+        {
             let previous_page = page.saturating_sub(1);
+
             let next_page = page + 1;
 
-            // Add a random delay before making the request.
-            if config.aggregator.random_delay || config.debug {
-                let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.subsec_nanos() as f32;
-                let delay = ((nanos / 1_0000_0000 as f32).floor() as u64) + 1;
-                tokio::time::sleep(Duration::from_secs(delay)).await;
-            }
+            let mut pages = vec![next_page, previous_page, page];
+            pages.dedup();
 
-            let results: (SearchResults, String, bool);
-            if page != previous_page {
-                let (previous_results, current_results, next_results) = join!(
-                    get_results(previous_page),
-                    get_results(page),
-                    get_results(next_page)
-                );
+            let urls: Vec<String> = pages
+                .iter()
+                .map(|page| {
+                    format!(
+                        "http://{}:{}/search?q={}&page={}&safesearch={}&engines={}",
+                        config.binding_ip,
+                        config.port,
+                        query,
+                        page,
+                        search_settings.safe_search_level,
+                        search_settings.engines.join(",")
+                    )
+                })
+                .collect();
 
-                results = current_results?;
+            let mut cache_keys: Vec<String> = tokio::task::spawn_blocking(move || {
+                urls.par_iter().cloned().map(hash_url).collect()
+            })
+            .await?;
 
-                let (results_list, cache_keys): (Vec<SearchResults>, Vec<String>) =
-                    [previous_results?, results.clone(), next_results?]
-                        .into_iter()
-                        .filter_map(|(result, cache_key, flag)| flag.then_some((result, cache_key)))
-                        .multiunzip();
+            let current_page_cache_key = cache_keys.pop().unwrap();
 
-                tokio::spawn(async move { cache.cache_results(&results_list, &cache_keys).await });
+            current_results = cache
+                .cached_results(&current_page_cache_key)
+                .await
+                .unwrap_or({
+                    let fetched_results =
+                        results(&config, query, page, &search_settings, user_agent).await?;
+                    let fetched_results_clone = fetched_results.clone();
+                    tokio::spawn(async move {
+                        cache
+                            .cache_results(&[fetched_results], &[current_page_cache_key])
+                            .await
+                    });
+                    fetched_results_clone
+                });
+
+            if let Ok(resolved_results) = cache.cached_results_exists(&cache_keys).await {
+                let cache_results_not_exists: (Vec<String>, Vec<u32>) = resolved_results
+                    .iter()
+                    .zip(cache_keys.iter())
+                    .zip(pages.iter())
+                    .filter(|resolved_result| *resolved_result.0 .0)
+                    .map(|resolved_result| (resolved_result.0 .1.to_string(), *resolved_result.1))
+                    .unzip();
+
+                // PERF: Move all the code above and below inside the same `tokio::spawn` task
+                // that is used for caching the results.
+                let tasks = pages
+                    .iter()
+                    .map(|page| results(&config, query, *page, &search_settings, user_agent));
+                let fetched_results = futures::future::try_join_all(tasks).await?;
+
+                tokio::spawn(async move {
+                    cache
+                        .cache_results(&fetched_results, &cache_results_not_exists.0)
+                        .await
+                });
             } else {
-                let (current_results, next_results) =
-                    join!(get_results(page), get_results(page + 1));
+                // PERF: Move all the code below inside the same `tokio::spawn` task
+                // that is used for caching the results.
+                let tasks = pages
+                    .iter()
+                    .map(|page| results(&config, query, *page, &search_settings, user_agent));
+                let fetched_results = futures::future::try_join_all(tasks).await?;
 
-                results = current_results?;
-
-                let (results_list, cache_keys): (Vec<SearchResults>, Vec<String>) =
-                    [results.clone(), next_results?]
-                        .into_iter()
-                        .filter_map(|(result, cache_key, flag)| flag.then_some((result, cache_key)))
-                        .multiunzip();
-
-                tokio::spawn(async move { cache.cache_results(&results_list, &cache_keys).await });
+                tokio::spawn(
+                    async move { cache.cache_results(&fetched_results, &cache_keys).await },
+                );
             }
-
-            Ok(HttpResponse::Ok().content_type(ContentType::html()).body(
-                crate::templates::views::search::search(
-                    &config.style.colorscheme,
-                    &config.style.theme,
-                    &config.style.animation,
-                    query,
-                    page,
-                    &results.0,
-                )
-                .0,
-            ))
         }
-        None => Ok(HttpResponse::TemporaryRedirect()
-            .insert_header(("location", "/"))
-            .finish()),
+
+        #[cfg(not(any(feature = "redis-cache", feature = "memory-cache")))]
+        {
+            current_results = results(&config, query, page, &search_settings, user_agent).await?;
+        }
+
+        return Ok(HttpResponse::Ok().content_type(ContentType::html()).body(
+            crate::templates::views::search::search(
+                &config.style.colorscheme,
+                &config.style.theme,
+                &config.style.animation,
+                query,
+                page,
+                &current_results,
+            )
+            .0,
+        ));
     }
+
+    Ok(HttpResponse::TemporaryRedirect()
+        .insert_header(("location", "/"))
+        .finish())
 }
 
 /// Fetches the results for a query and page. It First checks the redis cache, if that
@@ -159,85 +225,71 @@ pub async fn search(
 /// the cache or from the upstream search engines otherwise it returns an appropriate error.
 async fn results(
     config: &'static Config,
-    cache: &'static SharedCache,
     query: &str,
     page: u32,
     search_settings: &search_route::Cookie<'_>,
-) -> Result<(SearchResults, String, bool), Box<dyn std::error::Error>> {
+    user_agent: &'static str,
+) -> Result<SearchResults, Box<dyn std::error::Error>> {
     // eagerly parse cookie value to evaluate safe search level
     let safe_search_level = search_settings.safe_search_level;
 
-    let cache_key = format!(
-        "http://{}:{}/search?q={}&page={}&safesearch={}&engines={}",
-        config.binding_ip,
-        config.port,
-        query,
-        page,
-        safe_search_level,
-        search_settings.engines.join(",")
-    );
-
-    // fetch the cached results json.
-    let cached_results = cache.cached_results(&cache_key).await;
     // check if fetched cache results was indeed fetched or it was an error and if so
     // handle the data accordingly.
-    match cached_results {
-        Ok(results) => Ok((results, cache_key, false)),
-        Err(_) => {
-            if safe_search_level == 4 {
-                let mut results: SearchResults = SearchResults::default();
+    if safe_search_level == 4 {
+        let mut results: SearchResults = SearchResults::default();
 
-                let flag: bool =
-                    !is_match_from_filter_list(file_path(FileType::BlockList)?, query).await?;
-                // Return early when query contains disallowed words,
-                if flag {
-                    results.set_disallowed();
-                    cache
-                        .cache_results(&[results.clone()], &[cache_key.clone()])
-                        .await?;
-                    results.set_safe_search_level(safe_search_level);
-                    return Ok((results, cache_key, true));
-                }
-            }
-
-            // check if the cookie value is empty or not if it is empty then use the
-            // default selected upstream search engines from the config file otherwise
-            // parse the non-empty cookie and grab the user selected engines from the
-            // UI and use that.
-            let mut results: SearchResults = match search_settings.engines.is_empty() {
-                false => {
-                    aggregate(
-                        query,
-                        page,
-                        config,
-                        &search_settings
-                            .engines
-                            .iter()
-                            .filter_map(|engine| EngineHandler::new(engine).ok())
-                            .collect::<Vec<EngineHandler>>(),
-                        safe_search_level,
-                    )
-                    .await?
-                }
-                true => {
-                    let mut search_results = SearchResults::default();
-                    search_results.set_no_engines_selected();
-                    search_results
-                }
-            };
-            let (engine_errors_info, results_empty_check, no_engines_selected) = (
-                results.engine_errors_info().is_empty(),
-                results.results().is_empty(),
-                results.no_engines_selected(),
-            );
-            results.set_filtered(engine_errors_info & results_empty_check & !no_engines_selected);
-            cache
-                .cache_results(&[results.clone()], &[cache_key.clone()])
-                .await?;
+        let flag: bool =
+            !is_match_from_filter_list(&file_path(FileType::BlockList).await?, query).await?;
+        // Return early when query contains disallowed words,
+        if flag {
+            results.set_disallowed();
             results.set_safe_search_level(safe_search_level);
-            Ok((results, cache_key, true))
+            return Ok(results);
         }
     }
+
+    // check if the cookie value is empty or not if it is empty then use the
+    // default selected upstream search engines from the config file otherwise
+    // parse the non-empty cookie and grab the user selected engines from the
+    // UI and use that.
+    let mut results: SearchResults = if !search_settings.engines.is_empty() {
+        aggregate(
+            query,
+            page,
+            config,
+            &search_settings
+                .engines
+                .iter()
+                .filter_map(|engine| EngineHandler::new(engine).ok())
+                .collect::<Vec<EngineHandler>>(),
+            safe_search_level,
+            user_agent,
+        )
+        .await?
+    } else {
+        let mut search_results = SearchResults::default();
+        search_results.set_no_engines_selected();
+        search_results
+    };
+
+    let (engine_errors_info, results_empty_check, no_engines_selected) = (
+        results.engine_errors_info().is_empty(),
+        results.results().is_empty(),
+        results.no_engines_selected(),
+    );
+    results.set_filtered(engine_errors_info & results_empty_check & !no_engines_selected);
+    results.set_safe_search_level(safe_search_level);
+    Ok(results)
+}
+
+/// A helper function which computes the hash of the url and formats and returns it as string.
+///
+/// # Arguments
+///
+/// * `url` - It takes an url as string.
+#[cfg(any(feature = "redis-cache", feature = "memory-cache"))]
+fn hash_url(url: String) -> String {
+    blake3::hash(url.as_bytes()).to_string()
 }
 
 /// A helper function which checks whether the search query contains any keywords which should be
@@ -307,13 +359,14 @@ mod tests {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .subsec_nanos() as f32;
-        let delay = ((nanos / 1_0000_0000 as f32).floor() as i8) - 1;
+            .subsec_nanos();
+        let delay = (nanos % 10) as i8 - 1;
 
-        match delay {
-            -1 => None,
-            some_num => Some(if some_num > 4 { some_num - 4 } else { some_num } as u8),
+        if delay == -1 {
+            return None;
         }
+
+        Some(if delay > 4 { delay - 4 } else { delay } as u8)
     }
 
     #[test]
@@ -327,22 +380,18 @@ mod tests {
         let config_safe_search_level = mock_safe_search_level_value().unwrap_or(0);
 
         // Branched code
-        let safe_search_level_value_from_branched_code = match safe_search_level_from_url {
-            Some(safe_search_level_from_url_parsed) => {
+        let safe_search_level_value_from_branched_code =
+            if let Some(safe_search_level_from_url_parsed) = safe_search_level_from_url {
                 if config_safe_search_level >= 3 {
                     config_safe_search_level
                 } else {
                     safe_search_level_from_url_parsed
                 }
-            }
-            None => {
-                if config_safe_search_level >= 3 {
-                    config_safe_search_level
-                } else {
-                    cookie_safe_search_level
-                }
-            }
-        };
+            } else if config_safe_search_level >= 3 {
+                config_safe_search_level
+            } else {
+                cookie_safe_search_level
+            };
 
         // branchless code
         let safe_search_level_value_from_branchless_code =
