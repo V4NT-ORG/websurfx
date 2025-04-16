@@ -2,7 +2,7 @@
 
 use crate::handler::{file_path, FileType};
 use maud::{html, Markup};
-use std::fs::read_dir;
+use tokio::fs::read_dir;
 
 /// A helper function that helps in building the list of all available colorscheme/theme/animation
 /// names present in the colorschemes, animations and themes folder respectively by excluding the
@@ -19,17 +19,21 @@ use std::fs::read_dir;
 ///
 /// Returns a list of colorscheme/theme names as a vector of tuple strings on success otherwise
 /// returns a standard error message.
-fn style_option_list(
+async fn style_option_list(
     style_type: &str,
     selected_style: &str,
 ) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
     let mut style_option_names: Vec<(String, String)> = Vec::new();
-    for file in read_dir(format!(
+    while let Some(file) = read_dir(format!(
         "{}static/{}/",
-        file_path(FileType::Theme)?,
+        file_path(FileType::Theme).await?,
         style_type,
-    ))? {
-        let style_name = file?.file_name().to_str().unwrap().replace(".css", "");
+    ))
+    .await?
+    .next_entry()
+    .await?
+    {
+        let style_name = file.file_name().to_str().unwrap().replace(".css", "");
         if selected_style != style_name {
             style_option_names.push((style_name.clone(), style_name.replace('-', " ")));
         }
@@ -48,7 +52,7 @@ fn style_option_list(
 ///
 /// It returns the compiled html markup code for the user interface tab on success otherwise
 /// returns a standard error message.
-pub fn user_interface(
+pub async fn user_interface(
     theme: &str,
     colorscheme: &str,
     animation: &Option<String>,
@@ -63,7 +67,7 @@ pub fn user_interface(
            select name="themes"{
                // Sets the user selected theme name from the config file as the first option in the selection list.
                option value=(theme){(theme.replace('-', " "))}
-               @for (k,v) in style_option_list("themes", theme)?{
+               @for (k,v) in style_option_list("themes", theme).await?{
                    option value=(k){(v)}
                }
            }
@@ -74,7 +78,7 @@ pub fn user_interface(
            select name="colorschemes"{
                // Sets the user selected colorscheme name from the config file as the first option in the selection list.
                option value=(colorscheme){(colorscheme.replace('-', " "))}
-               @for (k,v) in style_option_list("colorschemes", colorscheme)?{
+               @for (k,v) in style_option_list("colorschemes", colorscheme).await?{
                    option value=(k){(v)}
                }
            }
@@ -87,7 +91,7 @@ pub fn user_interface(
                @let animation = animation.as_ref().unwrap_or(default_animation);
                // Sets the user selected animation name from the config file as the first option in the selection list.
                option value=(animation){(animation.replace('-'," "))}
-               @for (k,v) in style_option_list("animations", animation)?{
+               @for (k,v) in style_option_list("animations", animation).await?{
                    option value=(k){(v)}
                }
            }

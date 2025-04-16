@@ -71,12 +71,13 @@ impl Config {
     /// Returns a lua parse error if parsing of the config.lua file fails or has a syntax error
     /// or io error if the config.lua file doesn't exists otherwise it returns a newly constructed
     /// Config struct with all the parsed config options from the parsed config file.
-    pub fn parse(logging_initialized: bool) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn parse(logging_initialized: bool) -> Result<Self, Box<dyn std::error::Error>> {
         let lua = Lua::new();
         let globals = lua.globals();
 
-        lua.load(&fs::read_to_string(file_path(FileType::Config)?)?)
-            .exec()?;
+        lua.load(&fs::read_to_string(file_path(FileType::Config).await?)?)
+            .exec_async()
+            .await?;
 
         let parsed_threads: u8 = globals.get("threads")?;
 
@@ -101,31 +102,27 @@ impl Config {
 
         let rate_limiter: HashMap<String, u8> = globals.get("rate_limiter")?;
 
-        let parsed_safe_search: u8 = globals.get::<_>("safe_search")?;
-        let safe_search: u8 = match parsed_safe_search {
-            0..=4 => parsed_safe_search,
-            _ => {
-                log::error!("Config Error: The value of `safe_search` option should be a non zero positive integer from 0 to 4.");
-                log::error!("Falling back to using the value `1` for the option");
-                1
-            }
+        let parsed_safe_search: u8 = globals.get("safe_search")?;
+        let safe_search: u8 = if parsed_safe_search <= 4 {
+            parsed_safe_search
+        } else {
+            log::error!("Config Error: The value of `safe_search` option should be a non zero positive integer from 0 to 4.");
+            log::error!("Falling back to using the value `1` for the option");
+            1
         };
 
         #[cfg(any(feature = "redis-cache", feature = "memory-cache"))]
-        let parsed_cet = globals.get::<_>("cache_expiry_time")?;
+        let parsed_cet = globals.get("cache_expiry_time")?;
         #[cfg(any(feature = "redis-cache", feature = "memory-cache"))]
-        let cache_expiry_time = match parsed_cet {
-            0..=59 => {
-                log::error!(
-                    "Config Error: The value of `cache_expiry_time` must be greater than 60"
-                );
-                log::error!("Falling back to using the value `60` for the option");
-                60
-            }
-            _ => parsed_cet,
+        let cache_expiry_time = if parsed_cet < 60 {
+            log::error!("Config Error: The value of `cache_expiry_time` must be greater than 60");
+            log::error!("Falling back to using the value `60` for the option");
+            60
+        } else {
+            parsed_cet
         };
 
-        let proxy_opt: Option<String> = globals.get::<_>("proxy")?;
+        let proxy_opt: Option<String> = globals.get("proxy")?;
         let proxy = proxy_opt.and_then(|proxy_str| {
             Proxy::all(proxy_str).ok().and_then(|_| {
                 log::error!("Invalid proxy url, defaulting to no proxy.");
@@ -134,30 +131,29 @@ impl Config {
         });
 
         Ok(Config {
-            operating_system_tls_certificates: globals
-                .get::<_>("operating_system_tls_certificates")?,
-            port: globals.get::<_>("port")?,
-            binding_ip: globals.get::<_>("binding_ip")?,
+            operating_system_tls_certificates: globals.get("operating_system_tls_certificates")?,
+            port: globals.get("port")?,
+            binding_ip: globals.get("binding_ip")?,
             style: Style::new(
-                globals.get::<_>("theme")?,
-                globals.get::<_>("colorscheme")?,
-                globals.get::<_>("animation")?,
+                globals.get("theme")?,
+                globals.get("colorscheme")?,
+                globals.get("animation")?,
             ),
             #[cfg(feature = "redis-cache")]
-            redis_url: globals.get::<_>("redis_url")?,
+            redis_url: globals.get("redis_url")?,
             aggregator: AggregatorConfig {
-                random_delay: globals.get::<_>("production_use")?,
+                random_delay: globals.get("production_use")?,
             },
             logging,
             debug,
             adaptive_window,
-            upstream_search_engines: globals.get::<_>("upstream_search_engines")?,
-            request_timeout: globals.get::<_>("request_timeout")?,
-            tcp_connection_keep_alive: globals.get::<_>("tcp_connection_keep_alive")?,
-            pool_idle_connection_timeout: globals.get::<_>("pool_idle_connection_timeout")?,
-            number_of_https_connections: globals.get::<_>("number_of_https_connections")?,
+            upstream_search_engines: globals.get("upstream_search_engines")?,
+            request_timeout: globals.get("request_timeout")?,
+            tcp_connection_keep_alive: globals.get("tcp_connection_keep_alive")?,
+            pool_idle_connection_timeout: globals.get("pool_idle_connection_timeout")?,
+            number_of_https_connections: globals.get("number_of_https_connections")?,
             threads,
-            client_connection_keep_alive: globals.get::<_>("client_connection_keep_alive")?,
+            client_connection_keep_alive: globals.get("client_connection_keep_alive")?,
             rate_limiter: RateLimiter {
                 number_of_requests: rate_limiter["number_of_requests"],
                 time_limit: rate_limiter["time_limit"],

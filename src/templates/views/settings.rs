@@ -26,7 +26,7 @@ use crate::templates::partials::{
 ///
 /// This function returns a compiled html markup code on success otherwise returns a standard error
 /// message.
-pub fn settings(
+pub async fn settings(
     safe_search_level: u8,
     colorscheme: &str,
     theme: &str,
@@ -47,7 +47,7 @@ pub fn settings(
               }
               .main_container{
                   (general(safe_search_level))
-                  (user_interface(theme, colorscheme, animation)?)
+                  (user_interface(theme, colorscheme, animation).await?)
                   (engines(engine_names))
                   (cookies())
                   p class="message"{}
