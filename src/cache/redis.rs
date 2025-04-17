@@ -7,10 +7,7 @@ use crate::parser::Config;
 use error_stack::Report;
 use futures::stream::FuturesUnordered;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use redis::{
-    aio::ConnectionManager, AsyncCommands, Client, ExistenceCheck, SetExpiry,
-    SetOptions,
-};
+use redis::{aio::ConnectionManager, AsyncCommands, Client, ExistenceCheck, SetExpiry, SetOptions};
 
 /// A constant holding the redis pipeline size.
 const REDIS_PIPELINE_SIZE: usize = 3;
@@ -232,5 +229,3 @@ impl Cacher for RedisCache {
             .await
     }
 }
-
-

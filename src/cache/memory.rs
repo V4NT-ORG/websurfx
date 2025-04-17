@@ -62,9 +62,7 @@ impl Cacher for InMemoryCache {
     ) -> Result<(), Report<CacheError>> {
         let mut tasks: Vec<_> = Vec::with_capacity(urls.len());
 
-        for (hashed_url_string, search_result) in
-            urls.iter().cloned().zip(search_results.iter())
-        {
+        for (hashed_url_string, search_result) in urls.iter().cloned().zip(search_results.iter()) {
             let bytes = self.pre_process_search_results(search_result).await?;
             let new_self = self.clone();
             tasks.push(tokio::spawn(async move {

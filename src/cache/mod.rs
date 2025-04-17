@@ -575,5 +575,3 @@ impl SharedCache {
         cache_results
     }
 }
-
-
