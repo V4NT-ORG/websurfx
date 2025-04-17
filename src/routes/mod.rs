@@ -46,7 +46,7 @@ pub async fn not_found(
 #[get("/robots.txt")]
 pub async fn robots_data(_req: HttpRequest) -> Result<HttpResponse, Box<dyn std::error::Error>> {
     let page_content: String =
-        read_to_string(format!("{}/robots.txt", file_path(FileType::Theme)?)).await?;
+        read_to_string(format!("{}/robots.txt", file_path(FileType::Theme).await?)).await?;
     Ok(HttpResponse::Ok()
         .content_type(ContentType::plaintext())
         .body(page_content))
@@ -79,7 +79,8 @@ pub async fn settings(
             &config.style.theme,
             &config.style.animation,
             &config.upstream_search_engines,
-        )?
+        )
+        .await?
         .0,
     ))
 }
