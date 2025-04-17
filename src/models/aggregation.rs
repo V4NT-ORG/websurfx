@@ -2,30 +2,31 @@
 //! data scraped from the upstream search engines.
 
 use super::engine::EngineError;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
+
 #[cfg(any(
     feature = "use-synonyms-search",
     feature = "use-non-static-synonyms-search"
 ))]
-use thesaurus::synonyms;
+use {arc_swap::ArcSwap, rayon::iter::ParallelExtend, std::sync::Arc, thesaurus::synonyms};
+
 /// A named struct to store the raw scraped search results scraped search results from the
 /// upstream search engines before aggregating it.It derives the Clone trait which is needed
 /// to write idiomatic rust using `Iterators`.
-///
-///   (href url in html in simple words).
-///
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchResult {
     /// The title of the search result.
     pub title: String,
-    /// The url which is accessed when clicked on it
+    /// The url which is accessed when clicked on it (href url in html in simple words).
     pub url: String,
     /// The description of the search result.
     pub description: String,
     /// The names of the upstream engines from which this results were provided.
     pub engine: Vec<String>,
-    /// The td-tdf score of the result in regards to the title, url and description and the user's query
+    /// The td-tdf score of the result in regards to the title, url and description and the
+    /// user's query
     pub relevance_score: f32,
 }
 
@@ -257,45 +258,52 @@ fn calculate_tf_idf(
         feature = "use-synonyms-search",
         feature = "use-non-static-synonyms-search"
     ))]
-    let mut extra_tokens = vec![];
+    let extra_tokens = ArcSwap::from_pointee(Vec::new());
 
     let total_score: f32 = query_tokens
-        .iter()
+        .par_iter()
         .map(|token| {
             #[cfg(any(
                 feature = "use-synonyms-search",
                 feature = "use-non-static-synonyms-search"
             ))]
             {
+                let mut extra_tokens_owned = (*extra_tokens.load_full()).clone();
+
                 // find some synonyms and add them to the search  (from wordnet or moby if feature is enabled)
-                extra_tokens.extend(synonyms(token))
+                extra_tokens_owned.par_extend(synonyms(token));
+
+                extra_tokens.store(Arc::new(extra_tokens_owned));
             }
 
             tf_idf.get_score(token)
         })
         .sum();
 
+    let result: f32;
+
     #[cfg(not(any(
         feature = "use-synonyms-search",
         feature = "use-non-static-synonyms-search"
     )))]
-    let result = total_score / (query_tokens.len() as f32);
+    {
+        result = total_score / (query_tokens.len() as f32);
+    }
 
     #[cfg(any(
         feature = "use-synonyms-search",
         feature = "use-non-static-synonyms-search"
     ))]
-    let extra_total_score: f32 = extra_tokens
-        .iter()
-        .map(|token| tf_idf.get_score(token))
-        .sum();
+    {
+        let extra_tokens_owned = (*extra_tokens.load_full()).clone();
+        let extra_total_score: f32 = extra_tokens_owned
+            .par_iter()
+            .map(|token| tf_idf.get_score(token))
+            .sum();
 
-    #[cfg(any(
-        feature = "use-synonyms-search",
-        feature = "use-non-static-synonyms-search"
-    ))]
-    let result =
-        (extra_total_score + total_score) / ((query_tokens.len() + extra_tokens.len()) as f32);
+        result = (extra_total_score + total_score)
+            / ((query_tokens.len() + extra_tokens_owned.len()) as f32);
+    }
 
     f32::from(!result.is_nan()) * result
 }
