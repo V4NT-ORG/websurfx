@@ -1,11 +1,8 @@
 //! This main library module provides the functionality to provide and handle the Tcp server
 //! and register all the routes for the `websurfx` meta search engine website.
 
-#![forbid(unsafe_code, clippy::panic)]
-#![deny(missing_docs, clippy::missing_docs_in_private_items, clippy::perf)]
-#![warn(clippy::cognitive_complexity, rust_2018_idioms)]
-
 mod aggregator;
+#[cfg(any(feature = "redis-cache", feature = "memory-cache"))]
 mod cache;
 mod engines;
 mod handler;
@@ -14,8 +11,6 @@ pub mod parser;
 mod routes;
 pub mod templates;
 mod user_agent;
-
-use std::{net::TcpListener, time::Duration};
 
 use actix_cors::Cors;
 use actix_files as fs;
@@ -26,13 +21,9 @@ use actix_web::{
     middleware::{Compress, Logger},
     web, App, HttpServer,
 };
-use cache::SharedCache;
 use handler::{file_path, FileType};
 use parser::Config;
-use tokio::sync::OnceCell;
-
-/// A static constant for holding the cache struct.
-static SHARED_CACHE: OnceCell<SharedCache> = OnceCell::const_new();
+use tokio::{net::TcpListener, time::Duration};
 
 /// Runs the web server on the provided TCP listener and returns a `Server` instance.
 ///
@@ -47,27 +38,29 @@ static SHARED_CACHE: OnceCell<SharedCache> = OnceCell::const_new();
 /// # Example
 ///
 /// ```rust
-/// use std::{net::TcpListener, sync::OnceLock};
+/// use tokio::{sync::OnceCell, net::TcpListener};
 /// use websurfx::{parser::Config, run};
 ///
 /// /// A static constant for holding the parsed config.
-/// static CONFIG: OnceLock<Config> = OnceLock::new();
+/// static CONFIG: OnceCell<Config> = OnceCell::const_new();
 ///
 /// #[tokio::main]
 /// async fn main(){
 ///     // Initialize the parsed config globally.
-///     let config = CONFIG.get_or_init(|| Config::parse(true).unwrap());
-///     let listener = TcpListener::bind("127.0.0.1:8080").expect("Failed to bind address");
+///     let config = CONFIG
+///        .get_or_try_init(|| async move {
+///            Config::parse(false)
+///                .await
+///                .map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e.to_string()))
+///        })
+///        .await
+///        .unwrap();
+///     let listener = TcpListener::bind("127.0.0.1:8080").await.expect("Failed to bind address");
 ///     let server = run(listener,&config).await.expect("Failed to start server");
 /// }
 /// ```
-pub async fn run(listener: TcpListener, config: &'static Config) -> std::io::Result<Server> {
-    let public_folder_path: &str = file_path(FileType::Theme)?;
-
-    let cache = SHARED_CACHE
-        .get_or_try_init(|| SharedCache::new(config))
-        .await
-        .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err.to_string()))?;
+pub async fn run(listener: TcpListener, config: &'static Config) -> tokio::io::Result<Server> {
+    let public_folder_path = file_path(FileType::Theme).await?;
 
     let server = HttpServer::new(move || {
         let cors: Cors = Cors::default()
@@ -85,7 +78,6 @@ pub async fn run(listener: TcpListener, config: &'static Config) -> std::io::Res
             .wrap(Compress::default())
             .wrap(Logger::default()) // added logging middleware for logging.
             .app_data(web::Data::new(config))
-            .app_data(web::Data::new(cache))
             .wrap(cors)
             .wrap(Governor::new(
                 &GovernorConfigBuilder::default()
@@ -117,7 +109,7 @@ pub async fn run(listener: TcpListener, config: &'static Config) -> std::io::Res
         config.client_connection_keep_alive as u64,
     ))
     // Start server on 127.0.0.1 with the user provided port number. for example 127.0.0.1:8080.
-    .listen(listener)?
+    .listen(listener.into_std()?)?
     .run();
     Ok(server)
 }
