@@ -53,10 +53,12 @@ impl SearchResultParser {
                 let title = result.select(&self.result_title).next();
                 let url = result.select(&self.result_url).next();
                 let desc = result.select(&self.result_desc).next();
-                match (title, url, desc) {
-                    (Some(ref t), Some(ref u), Some(ref d)) => builder(t, u, d),
-                    _ => None,
+
+                if let (Some(ref t), Some(ref u), Some(ref d)) = (title, url, desc) {
+                    return builder(t, u, d);
                 }
+
+                None
             })
             .map(|search_result| (search_result.url.clone(), search_result))
             .collect();

@@ -110,15 +110,10 @@ impl SearchEngine for Mojeek {
 
         let query_params_string = build_query(&query_params);
 
-        let url: String = match page {
-            0 => {
-                format!("https://www.mojeek.com/search?q={query}{query_params_string}")
-            }
-            _ => {
-                format!(
-                    "https://www.mojeek.com/search?q={query}&s={start_result}{query_params_string}"
-                )
-            }
+        let url: String = if page == 0 {
+            format!("https://www.mojeek.com/search?q={query}{query_params_string}")
+        } else {
+            format!("https://www.mojeek.com/search?q={query}&s={start_result}{query_params_string}")
         };
 
         let cookie_string = build_cookie(&query_params);

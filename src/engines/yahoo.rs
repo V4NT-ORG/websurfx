@@ -69,14 +69,14 @@ impl SearchEngine for Yahoo {
     ) -> Result<Vec<(String, SearchResult)>, EngineError> {
         // Page number can be missing or empty string and so appropriate handling is required
         // so that upstream server recieves valid page number.
-        let url: String = match page {
-            0 => format!("https://search.yahoo.com/search/?p={}", query),
-
-            _ => format!(
+        let url: String = if page == 0 {
+            format!("https://search.yahoo.com/search/?p={}", query)
+        } else {
+            format!(
                 "https://search.yahoo.com/search/?p={}&b={}",
                 query,
                 (page * 10) + 1
-            ),
+            )
         };
 
         // initializing HeaderMap and adding appropriate headers.
