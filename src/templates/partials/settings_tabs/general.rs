@@ -1,6 +1,6 @@
 //! A module that handles the general tab for setting page view in the `websurfx` frontend.
 
-use maud::{html, Markup};
+use maud::{Markup, html};
 
 /// A constant holding the named safe search level options for the corresponding values 0, 1 and 2.
 const SAFE_SEARCH_LEVELS: [(u8, &str); 3] = [(0, "None"), (1, "Low"), (2, "Moderate")];

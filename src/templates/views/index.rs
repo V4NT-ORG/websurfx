@@ -1,6 +1,6 @@
 //! A module that handles the view for the index/home/main page in the `websurfx` frontend.
 
-use maud::{html, Markup, PreEscaped};
+use maud::{Markup, PreEscaped, html};
 
 use crate::templates::partials::{bar::bar, footer::footer, header::header};
 

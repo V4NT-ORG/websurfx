@@ -1,7 +1,7 @@
 //! A module that handles the view for the 404 page in the `websurfx` frontend.
 
 use crate::templates::partials::{footer::footer, header::header};
-use maud::{html, Markup};
+use maud::{Markup, html};
 
 /// A function that handles the html code for the 404 page view in the search engine frontend.
 ///

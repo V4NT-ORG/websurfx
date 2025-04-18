@@ -55,7 +55,7 @@ impl SearchResult {
     ///
     /// * query -  the query string  used to obtain the results
     pub fn calculate_relevance(&mut self, query: &str) {
-        use stop_words::{get, LANGUAGE};
+        use stop_words::{LANGUAGE, get};
         // when language settings can change to any of the ones supported on this crate: https://docs.rs/crate/stop-words/0.8.0
         let documents = [
             self.title.clone(),

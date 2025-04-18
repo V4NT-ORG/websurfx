@@ -16,12 +16,13 @@ use actix_cors::Cors;
 use actix_files as fs;
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{
+    App, HttpServer,
     dev::Server,
     http::header,
     middleware::{Compress, Logger},
-    web, App, HttpServer,
+    web,
 };
-use handler::{file_path, FileType};
+use handler::{FileType, file_path};
 use parser::Config;
 use tokio::{net::TcpListener, time::Duration};
 

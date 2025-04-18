@@ -1,17 +1,18 @@
 //! This module handles the settings and download route of the search engine website.
 
 use crate::{
-    handler::{file_path, FileType},
-    models::{self, search_route},
     Config,
+    handler::{FileType, file_path},
+    models::{self, search_route},
 };
-use actix_multipart::form::{tempfile::TempFile, MultipartForm};
+use actix_multipart::form::{MultipartForm, tempfile::TempFile};
 use actix_web::{
+    HttpRequest, HttpResponse,
     cookie::{
-        time::{Duration, OffsetDateTime},
         Cookie,
+        time::{Duration, OffsetDateTime},
     },
-    get, post, web, HttpRequest, HttpResponse,
+    get, post, web,
 };
 use std::borrow::Cow;
 use std::io::Read;

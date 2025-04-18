@@ -1,13 +1,13 @@
 //! This module provides the functionality to cache the aggregated results fetched and aggregated
 //! from the upstream search engines in a json format.
 
-use super::{error::CacheError, Cacher};
+use super::{Cacher, error::CacheError};
 use crate::models::aggregation::SearchResults;
 use crate::parser::Config;
 use error_stack::Report;
 use futures::stream::FuturesUnordered;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use redis::{aio::ConnectionManager, AsyncCommands, Client, ExistenceCheck, SetExpiry, SetOptions};
+use redis::{AsyncCommands, Client, ExistenceCheck, SetExpiry, SetOptions, aio::ConnectionManager};
 
 /// A constant holding the redis pipeline size.
 const REDIS_PIPELINE_SIZE: usize = 3;

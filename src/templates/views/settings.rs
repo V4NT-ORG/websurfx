@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use maud::{html, Markup};
+use maud::{Markup, html};
 
 use crate::templates::partials::{
     footer::footer,

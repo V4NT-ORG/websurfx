@@ -1,7 +1,7 @@
 //! A module that handles the header for all the pages in the `websurfx` frontend.
 
 use crate::templates::partials::navbar::navbar;
-use maud::{html, Markup, PreEscaped, DOCTYPE};
+use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 /// A function that handles the html code for the header for all the pages in the search engine frontend.
 ///

@@ -3,10 +3,10 @@
 //! when requested.
 
 use crate::{
-    handler::{file_path, FileType},
+    handler::{FileType, file_path},
     parser::Config,
 };
-use actix_web::{get, http::header::ContentType, web, HttpRequest, HttpResponse};
+use actix_web::{HttpRequest, HttpResponse, get, http::header::ContentType, web};
 use tokio::fs::read_to_string;
 
 pub mod export_import;

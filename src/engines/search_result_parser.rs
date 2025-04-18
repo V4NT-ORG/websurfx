@@ -2,7 +2,7 @@
 
 use crate::models::{aggregation::SearchResult, engine::EngineError};
 use error_stack::{Report, Result};
-use scraper::{html::Select, ElementRef, Html, Selector};
+use scraper::{ElementRef, Html, Selector, html::Select};
 
 /// A html search result parser, based on a predefined CSS selectors.
 pub struct SearchResultParser {

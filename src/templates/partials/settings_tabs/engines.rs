@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use maud::{html, Markup};
+use maud::{Markup, html};
 
 /// A functions that handles the html code for the engines tab for the settings page for the search page.
 ///

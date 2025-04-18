@@ -2,8 +2,8 @@
 //! by querying the upstream searx search engine instance with user provided query and with a page
 //! number if provided.
 
-use reqwest::header::HeaderMap;
 use reqwest::Client;
+use reqwest::header::HeaderMap;
 use scraper::Html;
 use std::collections::HashMap;
 
@@ -79,10 +79,10 @@ impl SearchEngine for Searx {
 
         if let Some(no_result_msg) = self.parser.parse_for_no_results(&document).nth(1) {
             if no_result_msg.inner_html()
-            == "we didn't find any results. Please use another query or search in more categories"
-        {
-            return Err(Report::new(EngineError::EmptyResultSet));
-        }
+                == "we didn't find any results. Please use another query or search in more categories"
+            {
+                return Err(Report::new(EngineError::EmptyResultSet));
+            }
         }
 
         // scrape all the results from the html

@@ -1,6 +1,6 @@
 //! This module provides the memory cache structures for enabling the use of memory caching.
 
-use super::{error::CacheError, Cacher};
+use super::{Cacher, error::CacheError};
 use crate::models::aggregation::SearchResults;
 use crate::parser::Config;
 use error_stack::Report;

@@ -115,8 +115,8 @@ trait Cacher: Send + Sync {
         encrypt: bool,
     ) -> Result<Vec<u8>, Report<CacheError>> {
         use chacha20poly1305::{
-            aead::{Aead, AeadCore, KeyInit, OsRng},
             ChaCha20Poly1305,
+            aead::{Aead, AeadCore, KeyInit, OsRng},
         };
 
         Ok(

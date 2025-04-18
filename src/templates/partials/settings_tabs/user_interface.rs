@@ -1,7 +1,7 @@
 //! A module that handles the user interface tab for setting page view in the `websurfx` frontend.
 
-use crate::handler::{file_path, FileType};
-use maud::{html, Markup};
+use crate::handler::{FileType, file_path};
+use maud::{Markup, html};
 use tokio::fs::read_dir;
 
 /// A helper function that helps in building the list of all available colorscheme/theme/animation

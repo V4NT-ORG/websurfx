@@ -1,7 +1,7 @@
 //! This module provides the functionality to parse the lua config and convert the config options
 //! into rust readable form.
 
-use crate::handler::{file_path, FileType};
+use crate::handler::{FileType, file_path};
 
 use crate::models::parser::{AggregatorConfig, RateLimiter, Style};
 use log::LevelFilter;
@@ -106,7 +106,9 @@ impl Config {
         let safe_search: u8 = if parsed_safe_search <= 4 {
             parsed_safe_search
         } else {
-            log::error!("Config Error: The value of `safe_search` option should be a non zero positive integer from 0 to 4.");
+            log::error!(
+                "Config Error: The value of `safe_search` option should be a non zero positive integer from 0 to 4."
+            );
             log::error!("Falling back to using the value `1` for the option");
             1
         };

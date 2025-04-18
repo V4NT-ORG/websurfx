@@ -1,6 +1,6 @@
 //! A module that handles the footer for all the pages in the `websurfx` frontend.
 
-use maud::{html, Markup, PreEscaped};
+use maud::{Markup, PreEscaped, html};
 
 /// A functions that handles the html code for the footer for all the pages in the search engine
 /// frontend.

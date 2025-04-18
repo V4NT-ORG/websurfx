@@ -1,7 +1,7 @@
 //! This module provides the functionality to scrape and gathers all the results from the upstream
 //! search engines and then removes duplicate results.
 
-use crate::handler::{file_path, FileType};
+use crate::handler::{FileType, file_path};
 use crate::models::{
     aggregation::{EngineErrorInfo, SearchResult, SearchResults},
     engine::{EngineError, EngineHandler},
@@ -298,12 +298,16 @@ mod tests {
         .await?;
 
         assert_eq!(resultant_map.len(), 2);
-        assert!(resultant_map
-            .iter()
-            .any(|(key, _)| key == "https://www.example.com"));
-        assert!(resultant_map
-            .iter()
-            .any(|(key, _)| key == "https://www.rust-lang.org/"));
+        assert!(
+            resultant_map
+                .iter()
+                .any(|(key, _)| key == "https://www.example.com")
+        );
+        assert!(
+            resultant_map
+                .iter()
+                .any(|(key, _)| key == "https://www.rust-lang.org/")
+        );
         assert_eq!(map_to_be_filtered.len(), 0);
 
         Ok(())
@@ -349,13 +353,17 @@ mod tests {
         .await?;
 
         assert_eq!(resultant_map.len(), 1);
-        assert!(resultant_map
-            .iter()
-            .any(|(key, _)| key == "https://www.example.com"));
+        assert!(
+            resultant_map
+                .iter()
+                .any(|(key, _)| key == "https://www.example.com")
+        );
         assert_eq!(map_to_be_filtered.len(), 1);
-        assert!(map_to_be_filtered
-            .iter()
-            .any(|(key, _)| key == "https://www.rust-lang.org/"));
+        assert!(
+            map_to_be_filtered
+                .iter()
+                .any(|(key, _)| key == "https://www.rust-lang.org/")
+        );
 
         Ok(())
     }

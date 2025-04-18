@@ -2,7 +2,7 @@
 
 use crate::{
     aggregator::aggregate,
-    handler::{file_path, FileType},
+    handler::{FileType, file_path},
     models::{
         aggregation::SearchResults,
         engine::EngineHandler,
@@ -15,7 +15,7 @@ use crate::{
 #[cfg(any(feature = "redis-cache", feature = "memory-cache"))]
 use {crate::cache::SharedCache, tokio::sync::OnceCell};
 
-use actix_web::{get, http::header::ContentType, web, HttpRequest, HttpResponse};
+use actix_web::{HttpRequest, HttpResponse, get, http::header::ContentType, web};
 use regex::Regex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{borrow::Cow, time::Duration};
@@ -155,8 +155,8 @@ pub async fn search(
                     .iter()
                     .zip(cache_keys.iter())
                     .zip(pages.iter())
-                    .filter(|resolved_result| !*resolved_result.0 .0)
-                    .map(|resolved_result| (resolved_result.0 .1.to_string(), *resolved_result.1))
+                    .filter(|resolved_result| !*resolved_result.0.0)
+                    .map(|resolved_result| (resolved_result.0.1.to_string(), *resolved_result.1))
                     .unzip();
 
                 // PERF: Move all the code above and below inside the same `tokio::spawn` task

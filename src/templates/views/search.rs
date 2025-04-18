@@ -1,6 +1,6 @@
 //! A module that handles the view for the search page in the `websurfx` frontend.
 
-use maud::{html, Markup, PreEscaped};
+use maud::{Markup, PreEscaped, html};
 
 use crate::{
     models::aggregation::SearchResults,
