@@ -1,6 +1,6 @@
 [package]
 name = "websurfx"
-version = "1.24.9"
+version = "1.24.11"
 edition = "2021"
 description = "An open-source alternative to Searx that provides clean, ad-free, and organic results with incredible speed while keeping privacy and security in mind."
 repository = "https://github.com/neon-mmd/websurfx"
@@ -83,7 +83,6 @@ stop-words = { version = "0.8.0", default-features = false, features = ["iso"] }
 thesaurus = { version = "0.5.2", default-features = false, optional = true, features = [
     "moby",
 ]}
-
 actix-multipart = { version = "0.7.2", default-features = false, features = [
     "derive",
     "tempfile",
@@ -105,14 +104,14 @@ minify-js = { git = "https://github.com/RuairidhWilliamson/minify-js", branch = 
 
 [lints.rust]
 unsafe_code = "forbid"
-rust_2018_idioms = { level = "warn", priority = -1 }
+rust_2018_idioms = { level = "warn", priority = 1 }
 missing_docs = "deny"
 
 [lints.clippy]
 cognitive_complexity = "warn"
 panic = "forbid"
 missing_docs_in_private_items = "deny"
-perf = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = 1 }
 
 [profile.dev]
 opt-level = 0
