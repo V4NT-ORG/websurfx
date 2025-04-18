@@ -155,7 +155,7 @@ pub async fn search(
                     .iter()
                     .zip(cache_keys.iter())
                     .zip(pages.iter())
-                    .filter(|resolved_result| *resolved_result.0 .0)
+                    .filter(|resolved_result| !*resolved_result.0 .0)
                     .map(|resolved_result| (resolved_result.0 .1.to_string(), *resolved_result.1))
                     .unzip();
 
