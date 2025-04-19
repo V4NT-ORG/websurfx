@@ -5,9 +5,9 @@ use super::{Cacher, error::CacheError};
 use crate::models::aggregation::SearchResults;
 use crate::parser::Config;
 use error_stack::Report;
-use futures::stream::FuturesUnordered;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use redis::{AsyncCommands, Client, ExistenceCheck, SetExpiry, SetOptions, aio::ConnectionManager};
+use tokio::task::JoinSet;
 
 /// A constant holding the redis pipeline size.
 const REDIS_PIPELINE_SIZE: usize = 3;
@@ -45,18 +45,16 @@ impl RedisCache {
         cache_ttl: u16,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let client = Client::open(redis_connection_url)?;
-        let tasks: FuturesUnordered<_> = FuturesUnordered::new();
+        let mut tasks: JoinSet<_> = JoinSet::new();
 
         for _ in 0..pool_size {
             let client_partially_cloned = client.clone();
-            tasks.push(tokio::spawn(async move {
-                client_partially_cloned.get_connection_manager().await
-            }));
+            tasks.spawn(async move { client_partially_cloned.get_connection_manager().await });
         }
 
         let mut outputs = Vec::with_capacity(tasks.len());
-        for task in tasks {
-            outputs.push(task.await??);
+        while let Some(task) = tasks.join_next().await {
+            outputs.push(task??);
         }
 
         let redis_cache = RedisCache {
