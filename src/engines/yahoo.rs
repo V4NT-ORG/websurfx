@@ -56,6 +56,27 @@ impl Yahoo {
     //     Ok(final_url)
     // }
 }
+fn parse_yahoo_redirect_url(raw_url: &str) -> String {
+    // Look for the /RU= marker
+    if let Some(start_idx) = raw_url.find("/RU=") {
+        let encoded_start = &raw_url[start_idx + 4..]; // skip "/RU="
+        let end_markers = ["/RS", "/RK"];
+        let end_idx = end_markers
+            .iter()
+            .filter_map(|marker| encoded_start.find(marker))
+            .min()
+            .unwrap_or(encoded_start.len());
+
+        let encoded_url = &encoded_start[..end_idx];
+
+        match urlencoding::decode(encoded_url) {
+            Ok(decoded) => decoded.into_owned(),
+            Err(_) => raw_url.to_string(), // fallback
+        }
+    } else {
+        raw_url.to_string()
+    }
+}
 
 #[async_trait::async_trait]
 impl SearchEngine for Yahoo {
@@ -107,11 +128,12 @@ impl SearchEngine for Yahoo {
                     .unwrap_or("No Title Found")
                     .trim()
                     .to_owned();
-                let cleaned_url = url
+                let raw_url = url
                     .value()
                     .attr("href")
-                    .unwrap_or("No Link Found")
-                    .to_owned();
+                    .unwrap_or("No Link Found");
+                
+                let cleaned_url = parse_yahoo_redirect_url(raw_url);
 
                 let cleaned_description = desc.inner_html().trim().to_owned();
                 Some(SearchResult::new(
