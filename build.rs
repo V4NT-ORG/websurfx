@@ -7,9 +7,9 @@
 
 // ------- Imports -------
 use lightningcss::stylesheet::{MinifyOptions, ParserOptions, PrinterOptions, StyleSheet};
-use minify_js::{minify, Session, TopLevelMode};
+use minify_js::{Session, TopLevelMode, minify};
 use std::{
-    fs::{read_dir, read_to_string, File, OpenOptions},
+    fs::{File, OpenOptions, read_dir, read_to_string},
     io::{Read, Write},
 };
 

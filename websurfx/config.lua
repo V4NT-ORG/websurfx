@@ -17,7 +17,7 @@ rate_limiter = {
 	time_limit = 3, -- The time limit in which the quantity of requests that should be accepted.
 }
 -- Set whether the server will use an adaptive/dynamic HTTPS window size, see https://httpwg.org/specs/rfc9113.html#fc-principles
-https_adaptive_window_size = false
+https_adaptive_window_size = true
 
 operating_system_tls_certificates = true -- Set whether the server will use operating system's tls certificates alongside rustls certificates while fetching search results from the upstream engines.
 
@@ -69,15 +69,15 @@ redis_url = "redis://127.0.0.1:8082" -- redis connection url address on which th
 cache_expiry_time = 600 -- This option takes the expiry time of the search results (value in seconds and the value should be greater than or equal to 60 seconds).
 -- ### Search Engines ###
 upstream_search_engines = {
-    DuckDuckGo = true,
-    Searx = false,
-    Brave = false,
-    Startpage = false,
-    LibreX = false,
-    Mojeek = false,
-    Bing = false,
-    Wikipedia = true,
-    Yahoo = false,
+	DuckDuckGo = true,
+	Searx = false,
+	Brave = false,
+	Startpage = false,
+	LibreX = false,
+	Mojeek = false,
+	Bing = false,
+	Wikipedia = true,
+	Yahoo = false,
 } -- select the upstream search engines from which the results should be fetched.
 
 proxy = nil -- Proxy to send outgoing requests through. Set to nil to disable.

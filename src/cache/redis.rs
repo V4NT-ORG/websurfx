@@ -1,29 +1,23 @@
 //! This module provides the functionality to cache the aggregated results fetched and aggregated
 //! from the upstream search engines in a json format.
 
-use super::{error::CacheError, Cacher};
+use super::{Cacher, error::CacheError};
 use crate::models::aggregation::SearchResults;
 use crate::parser::Config;
 use error_stack::Report;
-use futures::stream::FuturesUnordered;
-use redis::{
-    aio::ConnectionManager, AsyncCommands, Client, ExistenceCheck, RedisError, SetExpiry,
-    SetOptions,
-};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use redis::{AsyncCommands, Client, ExistenceCheck, SetExpiry, SetOptions, aio::ConnectionManager};
+use tokio::task::JoinSet;
 
 /// A constant holding the redis pipeline size.
 const REDIS_PIPELINE_SIZE: usize = 3;
 
 /// A named struct which stores the redis Connection url address to which the client will
 /// connect to.
+#[derive(Clone)]
 pub struct RedisCache {
     /// It stores a pool of connections ready to be used.
     connection_pool: Box<[ConnectionManager]>,
-    /// It stores the size of the connection pool (in other words the number of
-    /// connections that should be stored in the pool).
-    pool_size: u8,
-    /// It stores the index of which connection is being used at the moment.
-    current_connection: u8,
     /// It stores the max TTL for keys.
     cache_ttl: u16,
     /// It stores the redis pipeline struct of size 3.
@@ -51,29 +45,69 @@ impl RedisCache {
         cache_ttl: u16,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let client = Client::open(redis_connection_url)?;
-        let tasks: FuturesUnordered<_> = FuturesUnordered::new();
+        let mut tasks: JoinSet<_> = JoinSet::new();
 
         for _ in 0..pool_size {
             let client_partially_cloned = client.clone();
-            tasks.push(tokio::spawn(async move {
-                client_partially_cloned.get_connection_manager().await
-            }));
+            tasks.spawn(async move { client_partially_cloned.get_connection_manager().await });
         }
 
         let mut outputs = Vec::with_capacity(tasks.len());
-        for task in tasks {
-            outputs.push(task.await??);
+        while let Some(task) = tasks.join_next().await {
+            outputs.push(task??);
         }
 
         let redis_cache = RedisCache {
             connection_pool: outputs.into_boxed_slice(),
-            pool_size,
-            current_connection: Default::default(),
             cache_ttl,
             pipeline: redis::Pipeline::with_capacity(REDIS_PIPELINE_SIZE),
         };
 
         Ok(redis_cache)
+    }
+
+    /// A helper function which checks each connection in the pool to verify if the connections are
+    /// still usable (basically have they not been dropped or disconnected from the server) or not
+    /// and if they are usuable then it returns that connection from the pool.
+    ///
+    /// # Error
+    ///
+    /// It returns the connection it is usable otherwise it returns an error if all connections in
+    /// the pool are not usuable.
+    async fn connection(&self) -> Result<ConnectionManager, Report<CacheError>> {
+        for mut conn in self.connection_pool.clone() {
+            if conn.ping::<String>().await.is_ok() {
+                return Ok(conn);
+            }
+        }
+
+        Err(Report::new(
+            CacheError::PoolExhaustionWithConnectionDropError,
+        ))
+    }
+
+    /// A function which checks whether the cached value exists or not.
+    ///
+    /// # Arguments
+    ///  
+    /// * `key` - It takes a string as key.
+    ///
+    /// # Error
+    ///
+    /// Returns the json as a String from the cache on success otherwise returns a `CacheError`
+    /// on a failure.
+    pub async fn cached_json_exists(
+        &mut self,
+        keys: &[String],
+    ) -> Result<Vec<bool>, Report<CacheError>> {
+        for key in keys {
+            self.pipeline.exists(key);
+        }
+
+        self.pipeline
+            .query_async(&mut self.connection().await?)
+            .await
+            .map_err(|error| Report::new(CacheError::RedisError(error)))
     }
 
     /// A function which fetches the cached json as json string from the redis server.
@@ -87,40 +121,11 @@ impl RedisCache {
     /// Returns the json as a String from the cache on success otherwise returns a `CacheError`
     /// on a failure.
     pub async fn cached_json(&mut self, key: &str) -> Result<String, Report<CacheError>> {
-        self.current_connection = Default::default();
-
-        let mut result: Result<String, RedisError> = self.connection_pool
-            [self.current_connection as usize]
+        self.connection()
+            .await?
             .get(key)
-            .await;
-
-        // Code to check whether the current connection being used is dropped with connection error
-        // or not. if it drops with the connection error then the current connection is replaced
-        // with a new connection from the pool which is then used to run the redis command then
-        // that connection is also checked whether it is dropped or not if it is not then the
-        // result is passed as a `Result` or else the same process repeats again and if all of the
-        // connections in the pool result in connection drop error then a custom pool error is
-        // returned.
-        loop {
-            match result {
-                Err(error) => match error.is_connection_dropped() {
-                    true => {
-                        self.current_connection += 1;
-                        if self.current_connection == self.pool_size {
-                            return Err(Report::new(
-                                CacheError::PoolExhaustionWithConnectionDropError,
-                            ));
-                        }
-                        result = self.connection_pool[self.current_connection as usize]
-                            .get(key)
-                            .await;
-                        continue;
-                    }
-                    false => return Err(Report::new(CacheError::RedisError(error))),
-                },
-                Ok(res) => return Ok(res),
-            }
-        }
+            .await
+            .map_err(|error| Report::new(CacheError::RedisError(error)))
     }
 
     /// A function which caches the json by using the key and
@@ -141,8 +146,6 @@ impl RedisCache {
         json_results: impl Iterator<Item = String>,
         keys: impl Iterator<Item = String>,
     ) -> Result<(), Report<CacheError>> {
-        self.current_connection = Default::default();
-
         for (key, json_result) in keys.zip(json_results) {
             self.pipeline.set_options(
                 key,
@@ -154,41 +157,10 @@ impl RedisCache {
             );
         }
 
-        let mut result: Result<(), RedisError> = self
-            .pipeline
-            .query_async(&mut self.connection_pool[self.current_connection as usize])
-            .await;
-
-        // Code to check whether the current connection being used is dropped with connection error
-        // or not. if it drops with the connection error then the current connection is replaced
-        // with a new connection from the pool which is then used to run the redis command then
-        // that connection is also checked whether it is dropped or not if it is not then the
-        // result is passed as a `Result` or else the same process repeats again and if all of the
-        // connections in the pool result in connection drop error then a custom pool error is
-        // returned.
-        loop {
-            match result {
-                Err(error) => match error.is_connection_dropped() {
-                    true => {
-                        self.current_connection += 1;
-                        if self.current_connection == self.pool_size {
-                            return Err(Report::new(
-                                CacheError::PoolExhaustionWithConnectionDropError,
-                            ));
-                        }
-                        result = self
-                            .pipeline
-                            .query_async(
-                                &mut self.connection_pool[self.current_connection as usize],
-                            )
-                            .await;
-                        continue;
-                    }
-                    false => return Err(Report::new(CacheError::RedisError(error))),
-                },
-                Ok(_) => return Ok(()),
-            }
-        }
+        self.pipeline
+            .query_async(&mut self.connection().await?)
+            .await
+            .map_err(|error| Report::new(CacheError::RedisError(error)))
     }
 }
 
@@ -204,14 +176,24 @@ impl Cacher for RedisCache {
             .expect("Redis cache configured")
     }
 
+    async fn cached_results_exists(
+        &mut self,
+        urls: &[String],
+    ) -> Result<Vec<bool>, Report<CacheError>> {
+        Ok(self.cached_json_exists(urls).await?)
+    }
+
     async fn cached_results(&mut self, url: &str) -> Result<SearchResults, Report<CacheError>> {
         use base64::Engine;
-        let hashed_url_string: &str = &self.hash_url(url);
-        let base64_string = self.cached_json(hashed_url_string).await?;
+        let base64_string = self.cached_json(url).await?;
 
-        let bytes = base64::engine::general_purpose::STANDARD_NO_PAD
-            .decode(base64_string)
-            .map_err(|_| CacheError::Base64DecodingOrEncodingError)?;
+        let bytes = tokio::task::spawn_blocking(|| {
+            base64::engine::general_purpose::STANDARD_NO_PAD.decode(base64_string)
+        })
+        .await
+        .map_err(|_| CacheError::Base64DecodingOrEncodingError)?
+        .map_err(|_| CacheError::Base64DecodingOrEncodingError)?;
+
         self.post_process_search_results(bytes).await
     }
 
@@ -232,17 +214,16 @@ impl Cacher for RedisCache {
             bytes.push(processed);
         }
 
-        let base64_strings = bytes
-            .iter()
-            .map(|bytes_vec| base64::engine::general_purpose::STANDARD_NO_PAD.encode(bytes_vec));
+        let base64_strings = tokio::task::spawn_blocking(move || {
+            bytes
+                .par_iter()
+                .map(|bytes_vec| base64::engine::general_purpose::STANDARD_NO_PAD.encode(bytes_vec))
+                .collect::<Box<[String]>>()
+        })
+        .await
+        .map_err(|_| CacheError::Base64DecodingOrEncodingError)?;
 
-        let mut hashed_url_strings = Vec::with_capacity(search_results_len);
-
-        for url in urls {
-            let hash = self.hash_url(url);
-            hashed_url_strings.push(hash);
-        }
-        self.cache_json(base64_strings, hashed_url_strings.into_iter())
+        self.cache_json(base64_strings.iter().cloned(), urls.iter().cloned())
             .await
     }
 }

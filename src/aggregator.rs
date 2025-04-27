@@ -1,8 +1,7 @@
 //! This module provides the functionality to scrape and gathers all the results from the upstream
 //! search engines and then removes duplicate results.
 
-use super::user_agent::random_user_agent;
-use crate::handler::{file_path, FileType};
+use crate::handler::{FileType, file_path};
 use crate::models::{
     aggregation::{EngineErrorInfo, SearchResult, SearchResults},
     engine::{EngineError, EngineHandler},
@@ -10,14 +9,15 @@ use crate::models::{
 use crate::parser::Config;
 
 use error_stack::Report;
-use futures::stream::FuturesUnordered;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::slice::ParallelSliceMut;
 use regex::Regex;
 use reqwest::{Client, ClientBuilder};
 use std::sync::Arc;
+use tokio::task::JoinSet;
 use tokio::{
     fs::File,
     io::{AsyncBufReadExt, BufReader},
-    task::JoinHandle,
     time::Duration,
 };
 
@@ -25,8 +25,7 @@ use tokio::{
 static CLIENT: std::sync::OnceLock<Client> = std::sync::OnceLock::new();
 
 /// Aliases for long type annotations
-type FutureVec =
-    FuturesUnordered<JoinHandle<Result<Vec<(String, SearchResult)>, Report<EngineError>>>>;
+type FutureVec = JoinSet<Result<Vec<(String, SearchResult)>, Report<EngineError>>>;
 
 /// The function aggregates the scraped results from the user-selected upstream search engines.
 /// These engines can be chosen either from the user interface (UI) or from the configuration file.
@@ -72,6 +71,7 @@ pub async fn aggregate(
     config: &Config,
     upstream_search_engines: &[EngineHandler],
     safe_search: u8,
+    user_agent: &'static str,
 ) -> Result<SearchResults, Box<dyn std::error::Error>> {
     let client = CLIENT.get_or_init(|| {
         let mut cb = ClientBuilder::new()
@@ -96,19 +96,17 @@ pub async fn aggregate(
         cb.build().unwrap()
     });
 
-    let user_agent: &str = random_user_agent();
-
     let mut names: Vec<&str> = Vec::with_capacity(0);
 
     // create tasks for upstream result fetching
-    let tasks: FutureVec = FutureVec::new();
+    let mut tasks: FutureVec = JoinSet::new();
 
     let query: Arc<String> = Arc::new(query.to_string());
     for engine_handler in upstream_search_engines {
         let (name, search_engine) = engine_handler.clone().into_name_engine();
         names.push(name);
         let query_partially_cloned = query.clone();
-        tasks.push(tokio::spawn(async move {
+        tasks.spawn(async move {
             search_engine
                 .results(
                     &query_partially_cloned,
@@ -118,16 +116,7 @@ pub async fn aggregate(
                     safe_search,
                 )
                 .await
-        }));
-    }
-
-    // get upstream responses
-    let mut responses = Vec::with_capacity(tasks.len());
-
-    for task in tasks {
-        if let Ok(result) = task.await {
-            responses.push(result)
-        }
+        });
     }
 
     // aggregate search results, removing duplicates and handling errors the upstream engines returned
@@ -142,29 +131,20 @@ pub async fn aggregate(
         ));
     };
 
-    for _ in 0..responses.len() {
-        let response = responses.pop().unwrap();
+    while let Some(Ok(response)) = tasks.join_next().await {
         let engine = names.pop().unwrap();
 
-        if result_map.is_empty() {
-            match response {
-                Ok(results) => result_map = results,
-                Err(error) => handle_error(&error, engine),
-            };
-            continue;
-        }
-
-        match response {
-            Ok(result) => {
-                result.into_iter().for_each(|(key, value)| {
-                    match result_map.iter().find(|(key_s, _)| key_s == &key) {
-                        Some(value) => value.1.to_owned().add_engines(engine),
-                        None => result_map.push((key, value)),
-                    };
-                });
+        if let Ok(result) = response {
+            for (key, value) in result {
+                if let Some(value) = result_map.iter().find(|(key_s, _)| key_s == &key) {
+                    value.1.to_owned().add_engines(engine)
+                } else {
+                    result_map.push((key, value))
+                }
             }
-            Err(error) => handle_error(&error, engine),
-        };
+        } else if let Err(error) = response {
+            handle_error(&error, engine)
+        }
     }
 
     if safe_search >= 3 {
@@ -172,30 +152,37 @@ pub async fn aggregate(
         filter_with_lists(
             &mut result_map,
             &mut blacklist_map,
-            file_path(FileType::BlockList)?,
+            &file_path(FileType::BlockList).await?,
         )
         .await?;
 
         filter_with_lists(
             &mut blacklist_map,
             &mut result_map,
-            file_path(FileType::AllowList)?,
+            &file_path(FileType::AllowList).await?,
         )
         .await?;
 
         drop(blacklist_map);
     }
 
-    let mut results: Box<[SearchResult]> = result_map
-        .into_iter()
-        .map(|(_, mut value)| {
-            if !value.url.contains("temu.com") {
-                value.calculate_relevance(query.as_str())
-            }
-            value
-        })
-        .collect();
-    sort_search_results(&mut results);
+    let results: Box<[SearchResult]> = tokio::task::spawn_blocking(move || {
+        let mut unsorted_results: Box<[SearchResult]> = result_map
+            .par_iter()
+            .cloned()
+            .map(|(_, mut value)| {
+                if !value.url.contains("temu.com") {
+                    value.calculate_relevance(query.as_str())
+                }
+                value
+            })
+            .collect();
+
+        sort_search_results(&mut unsorted_results);
+
+        unsorted_results
+    })
+    .await?;
 
     Ok(SearchResults::new(
         results,
@@ -231,17 +218,16 @@ pub async fn filter_with_lists(
         while idx < length {
             let ele = &map_to_be_filtered[idx];
             let ele_inner = &ele.1;
-            match re.is_match(&ele.0.to_lowercase())
+            // If the search result matches the regex pattern, move it from the original map to the resultant map
+            if re.is_match(&ele.0.to_lowercase())
                 || re.is_match(&ele_inner.title.to_lowercase())
                 || re.is_match(&ele_inner.description.to_lowercase())
             {
-                true => {
-                    // If the search result matches the regex pattern, move it from the original map to the resultant map
-                    resultant_map.push(map_to_be_filtered.swap_remove(idx));
-                    length -= 1;
-                }
-                false => idx += 1,
-            };
+                resultant_map.push(map_to_be_filtered.swap_remove(idx));
+                length -= 1;
+            } else {
+                idx += 1;
+            }
         }
     }
 
@@ -251,11 +237,12 @@ pub async fn filter_with_lists(
 /// Sorts  SearchResults by relevance score.
 /// <br> sort_unstable is used as its faster,stability is not an issue on our side.
 /// For reasons why, check out [`this`](https://rust-lang.github.io/rfcs/1884-unstable-sort.html)
+///
 ///  # Arguments
+///
 ///  * `results` - A mutable slice or Vec of SearchResults
-///  
 fn sort_search_results(results: &mut [SearchResult]) {
-    results.sort_unstable_by(|a, b| {
+    results.par_sort_unstable_by(|a, b| {
         use std::cmp::Ordering;
 
         b.relevance_score
@@ -311,12 +298,16 @@ mod tests {
         .await?;
 
         assert_eq!(resultant_map.len(), 2);
-        assert!(resultant_map
-            .iter()
-            .any(|(key, _)| key == "https://www.example.com"));
-        assert!(resultant_map
-            .iter()
-            .any(|(key, _)| key == "https://www.rust-lang.org/"));
+        assert!(
+            resultant_map
+                .iter()
+                .any(|(key, _)| key == "https://www.example.com")
+        );
+        assert!(
+            resultant_map
+                .iter()
+                .any(|(key, _)| key == "https://www.rust-lang.org/")
+        );
         assert_eq!(map_to_be_filtered.len(), 0);
 
         Ok(())
@@ -362,13 +353,17 @@ mod tests {
         .await?;
 
         assert_eq!(resultant_map.len(), 1);
-        assert!(resultant_map
-            .iter()
-            .any(|(key, _)| key == "https://www.example.com"));
+        assert!(
+            resultant_map
+                .iter()
+                .any(|(key, _)| key == "https://www.example.com")
+        );
         assert_eq!(map_to_be_filtered.len(), 1);
-        assert!(map_to_be_filtered
-            .iter()
-            .any(|(key, _)| key == "https://www.rust-lang.org/"));
+        assert!(
+            map_to_be_filtered
+                .iter()
+                .any(|(key, _)| key == "https://www.rust-lang.org/")
+        );
 
         Ok(())
     }

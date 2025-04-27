@@ -1,6 +1,6 @@
 //! A module that handles `navbar` partial for the header partial in the `websurfx` frontend.
 
-use maud::{html, Markup};
+use maud::{Markup, html};
 
 /// A functions that handles the html code for the header partial.
 ///

@@ -4,8 +4,8 @@
 
 use std::collections::HashMap;
 
-use reqwest::header::HeaderMap;
 use reqwest::Client;
+use reqwest::header::HeaderMap;
 use scraper::Html;
 
 use crate::models::aggregation::SearchResult;
@@ -50,17 +50,14 @@ impl SearchEngine for DuckDuckGo {
     ) -> Result<Vec<(String, SearchResult)>, EngineError> {
         // Page number can be missing or empty string and so appropriate handling is required
         // so that upstream server recieves valid page number.
-        let url: String = match page {
-            0 => {
-                format!("https://html.duckduckgo.com/html/?q={query}&s=&dc=&v=1&o=json&api=/d.js")
-            }
-            _ => {
-                format!(
-                    "https://duckduckgo.com/html/?q={query}&s={}&dc={}&v=1&o=json&api=/d.js",
-                    page * 30,
-                    page * 30 + 1
-                )
-            }
+        let url: String = if page == 0 {
+            format!("https://html.duckduckgo.com/html/?q={query}&s=&dc=&v=1&o=json&api=/d.js")
+        } else {
+            format!(
+                "https://duckduckgo.com/html/?q={query}&s={}&dc={}&v=1&o=json&api=/d.js",
+                page * 30,
+                page * 30 + 1
+            )
         };
 
         // initializing HeaderMap and adding appropriate headers.

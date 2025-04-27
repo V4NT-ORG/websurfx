@@ -1,10 +1,9 @@
 //! This module provides the functionality to handle theme folder present on different paths and
 //! provide one appropriate path on which it is present and can be used.
 
-use std::collections::HashMap;
-use std::io::Error;
-use std::path::Path;
-use std::sync::OnceLock;
+use tokio::fs::try_exists;
+use tokio::io::Error;
+use tokio::sync::OnceCell;
 
 // ------- Constants --------
 /// The constant holding the name of the theme folder.
@@ -32,7 +31,8 @@ pub enum FileType {
 }
 
 /// A static variable which stores the different filesystem paths for various file/folder types.
-static FILE_PATHS_FOR_DIFF_FILE_TYPES: OnceLock<HashMap<FileType, Vec<String>>> = OnceLock::new();
+static FILE_PATHS_FOR_DIFF_FILE_TYPES: OnceCell<Vec<(FileType, Vec<String>)>> =
+    OnceCell::const_new();
 
 /// A function which returns an appropriate path for thr provided file type by checking if the path
 /// for the given file type exists on that path.
@@ -50,12 +50,12 @@ static FILE_PATHS_FOR_DIFF_FILE_TYPES: OnceLock<HashMap<FileType, Vec<String>>> 
 /// 1. `/opt/websurfx` if it not present here then it fallbacks to the next one (2)
 /// 2. Under project folder ( or codebase in other words) if it is not present
 ///    here then it returns an error as mentioned above.
-pub fn file_path(file_type: FileType) -> Result<&'static str, Error> {
+pub async fn file_path(file_type: FileType) -> Result<String, Error> {
     let home = env!("HOME");
 
-    let file_path: &Vec<String> = FILE_PATHS_FOR_DIFF_FILE_TYPES
-        .get_or_init(|| {
-            HashMap::from([
+    let file_path: Vec<String> = FILE_PATHS_FOR_DIFF_FILE_TYPES
+        .get_or_init(|| async move {
+            vec![
                 (
                     FileType::Config,
                     vec![
@@ -96,20 +96,22 @@ pub fn file_path(file_type: FileType) -> Result<&'static str, Error> {
                         format!("./{}/{}", COMMON_DIRECTORY_NAME, BLOCKLIST_FILE_NAME),
                     ],
                 ),
-            ])
+            ]
         })
-        .get(&file_type)
+        .await
+        .iter()
+        .find_map(|paths| (paths.0 == file_type).then_some(paths.1.clone()))
         .unwrap();
 
-    for path in file_path.iter() {
-        if Path::new(path).exists() {
+    for path in file_path {
+        if try_exists(&path).await? {
             return Ok(path);
         }
     }
 
     // if no of the configs above exist, return error
     Err(Error::new(
-        std::io::ErrorKind::NotFound,
+        tokio::io::ErrorKind::NotFound,
         format!("{:?} file/folder not found!!", file_type),
     ))
 }

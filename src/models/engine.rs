@@ -217,7 +217,7 @@ impl EngineHandler {
                 _ => {
                     return Err(Report::from(EngineError::NoSuchEngineFound(
                         engine_name.to_string(),
-                    )))
+                    )));
                 }
             };
 

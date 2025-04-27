@@ -3,10 +3,10 @@
 //! when requested.
 
 use crate::{
-    handler::{file_path, FileType},
+    handler::{FileType, file_path},
     parser::Config,
 };
-use actix_web::{get, http::header::ContentType, web, HttpRequest, HttpResponse};
+use actix_web::{HttpRequest, HttpResponse, get, http::header::ContentType, web};
 use tokio::fs::read_to_string;
 
 pub mod export_import;
@@ -46,7 +46,7 @@ pub async fn not_found(
 #[get("/robots.txt")]
 pub async fn robots_data(_req: HttpRequest) -> Result<HttpResponse, Box<dyn std::error::Error>> {
     let page_content: String =
-        read_to_string(format!("{}/robots.txt", file_path(FileType::Theme)?)).await?;
+        read_to_string(format!("{}/robots.txt", file_path(FileType::Theme).await?)).await?;
     Ok(HttpResponse::Ok()
         .content_type(ContentType::plaintext())
         .body(page_content))
@@ -79,7 +79,8 @@ pub async fn settings(
             &config.style.theme,
             &config.style.animation,
             &config.upstream_search_engines,
-        )?
+        )
+        .await?
         .0,
     ))
 }
