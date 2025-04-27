@@ -2,25 +2,26 @@
 //! results fetched and aggregated from the upstream search engines in a json format.
 
 use crate::{models::aggregation::SearchResults, parser::Config};
+use arc_swap::ArcSwap;
 use error::CacheError;
 use error_stack::Report;
-use tokio::sync::Mutex;
+use std::convert::TryInto;
 
 #[cfg(feature = "redis-cache")]
 use redis::RedisCache;
 
 #[cfg(feature = "memory-cache")]
-use memory::InMemoryCache;
+use {memory::InMemoryCache, std::sync::Arc};
 
 #[cfg(feature = "redis-cache")]
 #[cfg(any(feature = "encrypt-cache-results", feature = "cec-cache-results"))]
 use encryption::*;
 
+pub mod error;
+
 #[cfg(any(feature = "encrypt-cache-results", feature = "cec-cache-results"))]
 /// encryption module contains encryption utils such the cipher and key
 pub mod encryption;
-
-pub mod error;
 
 #[cfg(feature = "redis-cache")]
 pub mod redis;
@@ -56,6 +57,22 @@ trait Cacher: Send + Sync {
     /// returns a `CacheError` if the results cannot be retrieved from the cache.
     async fn cached_results(&mut self, url: &str) -> Result<SearchResults, Report<CacheError>>;
 
+    /// A function that checks if the cached results exists in the cache server or not.
+    ///
+    /// # Arguments
+    ///
+    /// * `urls` - It takes the hashed search urls as an argument which will be used as the key to
+    ///   check whether the cache exists or not.
+    ///
+    /// # Error
+    ///
+    /// Returns a Vector containing booleans for each respective url if nothing goes wrong otherwise
+    /// returns a `CacheError`.
+    async fn cached_results_exists(
+        &mut self,
+        urls: &[String],
+    ) -> Result<Vec<bool>, Report<CacheError>>;
+
     /// A function which caches the results by using the `url` as the key and
     /// `json results` as the value and stores it in the cache
     ///
@@ -74,15 +91,6 @@ trait Cacher: Send + Sync {
         search_results: &[SearchResults],
         urls: &[String],
     ) -> Result<(), Report<CacheError>>;
-
-    /// A helper function which computes the hash of the url and formats and returns it as string.
-    ///
-    /// # Arguments
-    ///
-    /// * `url` - It takes an url as string.
-    fn hash_url(&self, url: &str) -> String {
-        blake3::hash(url.as_bytes()).to_string()
-    }
 
     /// A helper function that returns  either encrypted or decrypted results.
     ///  Feature flags (**encrypt-cache-results or cec-cache-results**) are required  for this to work.
@@ -107,30 +115,36 @@ trait Cacher: Send + Sync {
         encrypt: bool,
     ) -> Result<Vec<u8>, Report<CacheError>> {
         use chacha20poly1305::{
-            aead::{Aead, AeadCore, KeyInit, OsRng},
             ChaCha20Poly1305,
+            aead::{Aead, AeadCore, KeyInit, OsRng},
         };
 
-        let cipher = CIPHER.get_or_init(|| {
-            let key = ChaCha20Poly1305::generate_key(&mut OsRng);
-            ChaCha20Poly1305::new(&key)
-        });
+        Ok(
+            tokio::task::spawn_blocking(move || -> Result<Vec<u8>, Report<CacheError>> {
+                let cipher = CIPHER.get_or_init(|| {
+                    let key = ChaCha20Poly1305::generate_key(&mut OsRng);
+                    ChaCha20Poly1305::new(&key)
+                });
 
-        let encryption_key = ENCRYPTION_KEY.get_or_init(
-            || ChaCha20Poly1305::generate_nonce(&mut OsRng), // 96-bits; unique per message
-        );
+                let encryption_key = ENCRYPTION_KEY.get_or_init(
+                    || ChaCha20Poly1305::generate_nonce(&mut OsRng), // 96-bits; unique per message
+                );
 
-        bytes = if encrypt {
-            cipher
-                .encrypt(encryption_key, bytes.as_ref())
-                .map_err(|_| CacheError::EncryptionError)?
-        } else {
-            cipher
-                .decrypt(encryption_key, bytes.as_ref())
-                .map_err(|_| CacheError::EncryptionError)?
-        };
+                bytes = if encrypt {
+                    cipher
+                        .encrypt(encryption_key, bytes.as_ref())
+                        .map_err(|_| CacheError::EncryptionError)?
+                } else {
+                    cipher
+                        .decrypt(encryption_key, bytes.as_ref())
+                        .map_err(|_| CacheError::EncryptionError)?
+                };
 
-        Ok(bytes)
+                Ok(bytes)
+            })
+            .await
+            .map_err(|_| CacheError::EncryptionError)??,
+        )
     }
 
     /// A helper function that returns compressed results.
@@ -322,12 +336,9 @@ async fn decompress_util(input: &[u8]) -> Result<Vec<u8>, Report<CacheError>> {
     Ok(bytes)
 }
 
-/// TODO: Remove this temporary compile error for `Nocache` feature in the upcoming releases.
-#[cfg(not(any(feature = "redis-cache", feature = "memory-cache")))]
-compile_error!("No cache feature has temporarily been disabled and will be reimplemented in the upcoming releases.");
-
 /// A named struct holding the cache configuration structs and provided when the respective
 /// features or both enabled.
+#[derive(Clone)]
 pub struct SwitchCache {
     /// It holds the redis server configuration struct.
     #[cfg(feature = "redis-cache")]
@@ -358,6 +369,40 @@ impl SwitchCache {
         })
     }
 
+    /// A function that checks if the cached results exists in the respective cache server or not.
+    ///
+    /// # Arguments
+    ///
+    /// * `urls` - It takes the hashed search urls as an argument which will be used as the key to
+    ///   check whether the cache exists or not.
+    ///
+    /// # Error
+    ///
+    /// Returns a Vector containing booleans for each respective url if nothing goes wrong otherwise
+    /// returns a `CacheError`.
+    async fn cached_results_exists(
+        &mut self,
+        urls: &[String],
+    ) -> Result<Vec<bool>, Report<CacheError>> {
+        #[cfg(all(feature = "redis-cache", not(feature = "memory-cache")))]
+        {
+            self.redis_cache.cached_results_exists(urls).await
+        }
+
+        #[cfg(all(feature = "memory-cache", not(feature = "redis-cache")))]
+        {
+            self.memory_cache.cached_results_exists(urls).await
+        }
+
+        #[cfg(all(feature = "memory-cache", feature = "redis-cache"))]
+        {
+            match self.redis_cache.cached_results_exists(urls).await {
+                Ok(res) => Ok(res),
+                Err(_) => self.memory_cache.cached_results_exists(urls).await,
+            }
+        }
+    }
+
     /// A function that fetches the cached data from the respective cache servers.
     ///
     /// # Arguments
@@ -371,7 +416,7 @@ impl SwitchCache {
     async fn cached_results(&mut self, url: &str) -> Result<SearchResults, Report<CacheError>> {
         #[cfg(all(feature = "redis-cache", not(feature = "memory-cache")))]
         {
-            Self.redis_cache.cached_results(url).await
+            self.redis_cache.cached_results(url).await
         }
 
         #[cfg(all(feature = "memory-cache", not(feature = "redis-cache")))]
@@ -426,8 +471,6 @@ impl SwitchCache {
 }
 
 /// TryInto implementation for SearchResults from Vec<u8>
-use std::{convert::TryInto, sync::Arc};
-
 impl TryInto<SearchResults> for Vec<u8> {
     type Error = CacheError;
 
@@ -444,8 +487,9 @@ impl TryInto<Vec<u8>> for &SearchResults {
     }
 }
 
-/// A structure to efficiently share the cache between threads - as it is protected by a Mutex.
-pub struct SharedCache(Arc<Mutex<SwitchCache>>);
+/// A structure to efficiently share the cache between threads - as it is protected by a lock-free
+/// ArcSwap structure.
+pub struct SharedCache(ArcSwap<SwitchCache>);
 
 impl SharedCache {
     /// A function that creates a new `SharedCache` from a Cache implementation.
@@ -456,9 +500,36 @@ impl SharedCache {
     ///
     /// Returns a newly constructed `SharedCache` struct.
     pub async fn new(config: &Config) -> Result<Self, Box<dyn std::error::Error>> {
-        Ok(Self(Arc::new(Mutex::new(
+        Ok(Self(ArcSwap::from_pointee(
             SwitchCache::build(config).await?,
-        ))))
+        )))
+    }
+
+    /// A lock-free, wait-free get operation.
+    ///
+    /// # Returns
+    ///
+    /// returns an owned copy of the `SwitchCache` struct.
+    fn cache(&self) -> SwitchCache {
+        (*self.0.load_full()).clone()
+    }
+
+    /// A function that checks if the cached results exists in the cache server or not.
+    ///
+    /// # Arguments
+    ///
+    /// * `urls` - It takes the hashed search urls as an argument which will be used as the key to
+    ///   check whether the cache exists or not.
+    ///
+    /// # Error
+    ///
+    /// Returns a Vector containing booleans for each respective url if nothing goes wrong otherwise
+    /// returns a `CacheError`.
+    pub async fn cached_results_exists(
+        &self,
+        urls: &[String],
+    ) -> Result<Vec<bool>, Report<CacheError>> {
+        self.cache().cached_results_exists(urls).await
     }
 
     /// A getter function which retrieves the cached SearchResulsts from the internal cache.
@@ -473,8 +544,7 @@ impl SharedCache {
     /// Returns a `SearchResults` struct containing the search results from the cache if nothing
     /// goes wrong otherwise returns a `CacheError`.
     pub async fn cached_results(&self, url: &str) -> Result<SearchResults, Report<CacheError>> {
-        let mut mut_cache = self.0.lock().await;
-        mut_cache.cached_results(url).await
+        self.cache().cached_results(url).await
     }
 
     /// A setter function which caches the results by using the `url` as the key and
@@ -496,7 +566,12 @@ impl SharedCache {
         search_results: &[SearchResults],
         urls: &[String],
     ) -> Result<(), Report<CacheError>> {
-        let mut mut_cache = self.0.lock().await;
-        mut_cache.cache_results(search_results, urls).await
+        let mut mut_cache = self.cache();
+        let cache_results = mut_cache.cache_results(search_results, urls).await;
+
+        #[cfg(feature = "memory-cache")]
+        self.0.store(Arc::new(mut_cache));
+
+        cache_results
     }
 }

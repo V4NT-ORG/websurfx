@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 
 use regex::Regex;
-use reqwest::header::HeaderMap;
 use reqwest::Client;
+use reqwest::header::HeaderMap;
 use scraper::Html;
 
 use crate::models::aggregation::SearchResult;
@@ -56,13 +56,10 @@ impl SearchEngine for Bing {
         let results_per_page = 10;
         let start_result = results_per_page * page + 1;
 
-        let url: String = match page {
-            0 => {
-                format!("https://www.bing.com/search?q={query}")
-            }
-            _ => {
-                format!("https://www.bing.com/search?q={query}&first={start_result}")
-            }
+        let url: String = if page == 0 {
+            format!("https://www.bing.com/search?q={query}")
+        } else {
+            format!("https://www.bing.com/search?q={query}&first={start_result}")
         };
 
         let query_params: Vec<(&str, &str)> = vec![

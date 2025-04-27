@@ -1,16 +1,16 @@
 use chacha20poly1305::{
-    consts::{B0, B1},
     ChaChaPoly1305,
+    consts::{B0, B1},
 };
 use std::sync::OnceLock;
 
 use chacha20::{
+    ChaChaCore,
     cipher::{
+        StreamCipherCoreWrapper,
         generic_array::GenericArray,
         typenum::{UInt, UTerm},
-        StreamCipherCoreWrapper,
     },
-    ChaChaCore,
 };
 
 /// The ChaCha20 core wrapped in a stream cipher for use in ChaCha20-Poly1305 authenticated encryption.

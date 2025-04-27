@@ -1,16 +1,26 @@
-use std::{net::TcpListener, sync::OnceLock};
+//! This module provides the tests for each page whether they work as intended or not.
 
+use tokio::{net::TcpListener, sync::OnceCell};
 use websurfx::{parser::Config, run, templates::views};
 
 /// A static constant for holding the parsed config.
-static CONFIG: OnceLock<Config> = OnceLock::new();
+static CONFIG: OnceCell<Config> = OnceCell::const_new();
 
 // Starts a new instance of the HTTP server, bound to a random available port
 async fn spawn_app() -> String {
     // Binding to port 0 will trigger the OS to assign a port for us.
-    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind random port");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind random port");
     let port = listener.local_addr().unwrap().port();
-    let config = CONFIG.get_or_init(|| Config::parse(false).unwrap());
+    let config = CONFIG
+        .get_or_try_init(|| async move {
+            Config::parse(false)
+                .await
+                .map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e.to_string()))
+        })
+        .await
+        .unwrap();
     let server = run(listener, config).await.expect("Failed to bind address");
 
     tokio::spawn(server);
@@ -25,7 +35,7 @@ async fn test_index() {
     let res = client.get(address).send().await.unwrap();
     assert_eq!(res.status(), 200);
 
-    let config = Config::parse(true).unwrap();
+    let config = Config::parse(true).await.unwrap();
     let template = views::index::index(
         &config.style.colorscheme,
         &config.style.theme,

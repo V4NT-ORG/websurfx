@@ -1,6 +1,6 @@
 //! This module provides the memory cache structures for enabling the use of memory caching.
 
-use super::{error::CacheError, Cacher};
+use super::{Cacher, error::CacheError};
 use crate::models::aggregation::SearchResults;
 use crate::parser::Config;
 use error_stack::Report;
@@ -37,12 +37,22 @@ impl Cacher for InMemoryCache {
         }
     }
 
+    async fn cached_results_exists(
+        &mut self,
+        urls: &[String],
+    ) -> Result<Vec<bool>, Report<CacheError>> {
+        Ok(urls
+            .iter()
+            .map(|url| self.cache.contains_key(url))
+            .collect())
+    }
+
     async fn cached_results(&mut self, url: &str) -> Result<SearchResults, Report<CacheError>> {
-        let hashed_url_string = self.hash_url(url);
-        match self.cache.get(&hashed_url_string).await {
-            Some(res) => self.post_process_search_results(res).await,
-            None => Err(Report::new(CacheError::MissingValue)),
+        if let Some(res) = self.cache.get(url).await {
+            return self.post_process_search_results(res).await;
         }
+
+        return Err(Report::new(CacheError::MissingValue));
     }
 
     async fn cache_results(
@@ -51,8 +61,8 @@ impl Cacher for InMemoryCache {
         urls: &[String],
     ) -> Result<(), Report<CacheError>> {
         let mut tasks: Vec<_> = Vec::with_capacity(urls.len());
-        for (url, search_result) in urls.iter().zip(search_results.iter()) {
-            let hashed_url_string = self.hash_url(url);
+
+        for (hashed_url_string, search_result) in urls.iter().cloned().zip(search_results.iter()) {
             let bytes = self.pre_process_search_results(search_result).await?;
             let new_self = self.clone();
             tasks.push(tokio::spawn(async move {

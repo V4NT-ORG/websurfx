@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use reqwest::{header::HeaderMap, Client};
+use reqwest::{Client, header::HeaderMap};
 use scraper::Html;
 
 use crate::models::aggregation::SearchResult;

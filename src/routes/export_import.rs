@@ -1,17 +1,18 @@
 //! This module handles the settings and download route of the search engine website.
 
 use crate::{
-    handler::{file_path, FileType},
-    models::{self, search_route},
     Config,
+    handler::{FileType, file_path},
+    models::{self, search_route},
 };
-use actix_multipart::form::{tempfile::TempFile, MultipartForm};
+use actix_multipart::form::{MultipartForm, tempfile::TempFile};
 use actix_web::{
+    HttpRequest, HttpResponse,
     cookie::{
-        time::{Duration, OffsetDateTime},
         Cookie,
+        time::{Duration, OffsetDateTime},
     },
-    get, post, web, HttpRequest, HttpResponse,
+    get, post, web,
 };
 use std::borrow::Cow;
 use std::io::Read;
@@ -37,7 +38,7 @@ async fn style_option_list(
     let mut style_options = Vec::new();
     let mut dir = read_dir(format!(
         "{}static/{}/",
-        file_path(FileType::Theme)?,
+        file_path(FileType::Theme).await?,
         style_type,
     ))
     .await?;
@@ -109,9 +110,10 @@ async fn sanitize(
         .collect();
     setting_value.engines = Cow::Owned(engines);
 
-    setting_value.safe_search_level = match setting_value.safe_search_level {
-        0..2 => setting_value.safe_search_level,
-        _ => u8::default(),
+    setting_value.safe_search_level = if setting_value.safe_search_level < 2 {
+        setting_value.safe_search_level
+    } else {
+        u8::default()
     };
 
     Ok(())
@@ -161,6 +163,7 @@ pub async fn set_settings(
             }
         }
     }
+
     Ok(HttpResponse::Ok().finish())
 }
 
