@@ -78,16 +78,44 @@ fn parse_yahoo_redirect_url(raw_url: &str) -> String {
         raw_url.to_string()
     }
 }
-
-/// Perform a percent-decoding manually using basic Rust stdlib
+/// Perform a percent-decoding using only the Rust standard library.
 fn percent_decode(input: &[u8]) -> Result<String, std::string::FromUtf8Error> {
-    use std::borrow::Cow;
-    let decoded = url::percent_encoding::percent_decode(input).decode_utf8_lossy();
-    match decoded {
-        Cow::Borrowed(s) => Ok(s.to_string()),
-        Cow::Owned(s) => Ok(s),
+    let mut output = Vec::with_capacity(input.len());
+    let mut i = 0;
+
+    while i < input.len() {
+        match input[i] {
+            b'%' if i + 2 < input.len() => {
+                if let (Some(h), Some(l)) = (from_hex(input[i + 1]), from_hex(input[i + 2])) {
+                    output.push(h * 16 + l);
+                    i += 3;
+                } else {
+                    // Invalid percent-encoding, keep literal
+                    output.push(input[i]);
+                    i += 1;
+                }
+            }
+            b => {
+                output.push(b);
+                i += 1;
+            }
+        }
+    }
+
+    String::from_utf8(output)
+}
+
+/// Convert a single ASCII hex character to its value.
+fn from_hex(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
+
+
 
 
 #[async_trait::async_trait]
