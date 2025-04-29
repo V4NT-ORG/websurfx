@@ -1,23 +1,20 @@
 //! The `yahoo` module handles the scraping of results from the yahoo search engine
 //! by querying the upstream yahoo search engine with user provided query and with a page
 
+use error_stack::{Report, Result as StackResult, ResultExt};
+
 use std::collections::HashMap;
 
 use reqwest::header::HeaderMap;
-
-// use reqwest::{Client, Error};
-
 use reqwest::Client;
-
 use scraper::Html;
 
 use crate::models::aggregation::SearchResult;
-
 use crate::models::engine::{EngineError, SearchEngine};
 
-use error_stack::{Report, Result, ResultExt};
-
 use super::search_result_parser::SearchResultParser;
+
+// Removed unused import: std::string::FromUtf8Error
 
 /// A new Yahoo engine type defined in-order to implement the `SearchEngine` trait which allows to
 /// reduce code duplication as well as allows to create vector of different search engines easily.
@@ -30,7 +27,7 @@ pub struct Yahoo {
 
 impl Yahoo {
     /// Creates the Yahoo parser.
-    pub fn new() -> Result<Self, EngineError> {
+    pub fn new() -> StackResult<Self, EngineError> {
         Ok(Self {
             parser: SearchResultParser::new(
                 ".compNoResult",
@@ -38,10 +35,11 @@ impl Yahoo {
                 "h3.title a",
                 "h3 a",
                 ".compText",
-            )?,
-            // client: Client::new(),
+            )
+            .change_context(EngineError::UnexpectedError)?,
         })
     }
+
     //TODO: Function not implemented yet
     //
     // Function to fetch the final destination URL after handling redirects
@@ -56,6 +54,7 @@ impl Yahoo {
     //     Ok(final_url)
     // }
 }
+
 fn parse_yahoo_redirect_url(raw_url: &str) -> String {
     // Look for the /RU= marker
     if let Some(start_idx) = raw_url.find("/RU=") {
@@ -78,9 +77,12 @@ fn parse_yahoo_redirect_url(raw_url: &str) -> String {
         raw_url.to_string()
     }
 }
-/// Perform a percent-decoding using only the Rust standard library.
 
-fn percent_decode(input: &[u8]) -> Result<String, error_stack::Report<std::string::FromUtf8Error>> {
+/// Perform a percent-decoding using only the Rust standard library.
+// use error_stack::{Report, Result};
+
+/// Perform percent-decoding using only the Rust standard library
+fn percent_decode(input: &[u8]) -> Result<String, Report<FromUtf8Error>> {
     let mut output = Vec::with_capacity(input.len());
     let mut i = 0;
 
@@ -91,7 +93,6 @@ fn percent_decode(input: &[u8]) -> Result<String, error_stack::Report<std::strin
                     output.push(h * 16 + l);
                     i += 3;
                 } else {
-                    // Invalid percent-encoding, keep literal
                     output.push(input[i]);
                     i += 1;
                 }
@@ -103,10 +104,12 @@ fn percent_decode(input: &[u8]) -> Result<String, error_stack::Report<std::strin
         }
     }
 
-    // Wrap the FromUtf8Error into a Report if there is an error
+    // Manually handle the error conversion to Report
     String::from_utf8(output).map_err(|e| Report::new(e))
 }
 
+// Need to add this import
+use std::string::FromUtf8Error;
 
 /// Convert a single ASCII hex character to its value.
 fn from_hex(byte: u8) -> Option<u8> {
@@ -118,9 +121,6 @@ fn from_hex(byte: u8) -> Option<u8> {
     }
 }
 
-
-
-
 #[async_trait::async_trait]
 impl SearchEngine for Yahoo {
     async fn results(
@@ -130,9 +130,7 @@ impl SearchEngine for Yahoo {
         user_agent: &str,
         client: &Client,
         _safe_search: u8,
-    ) -> Result<Vec<(String, SearchResult)>, EngineError> {
-        // Page number can be missing or empty string and so appropriate handling is required
-        // so that upstream server recieves valid page number.
+    ) -> StackResult<Vec<(String, SearchResult)>, EngineError> {
         let url: String = if page == 0 {
             format!("https://search.yahoo.com/search/?p={}", query)
         } else {
@@ -143,7 +141,6 @@ impl SearchEngine for Yahoo {
             )
         };
 
-        // initializing HeaderMap and adding appropriate headers.
         let header_map = HeaderMap::try_from(&HashMap::from([
             ("User-Agent".to_string(), user_agent.to_string()),
             ("Referer".to_string(), "https://google.com/".to_string()),
@@ -155,9 +152,11 @@ impl SearchEngine for Yahoo {
         ]))
         .change_context(EngineError::UnexpectedError)?;
 
-        let document: Html = Html::parse_document(
-            &Yahoo::fetch_html_from_upstream(self, &url, header_map, client).await?,
-        );
+        let html_str = Yahoo::fetch_html_from_upstream(self, &url, header_map, client)
+            .await
+            .change_context(EngineError::UnexpectedError)?;
+
+        let document: Html = Html::parse_document(&html_str);
 
         if self.parser.parse_for_no_results(&document).next().is_some() {
             return Err(Report::new(EngineError::EmptyResultSet));
@@ -165,20 +164,17 @@ impl SearchEngine for Yahoo {
 
         self.parser
             .parse_for_results(&document, |title, url, desc| {
-                // Scrape the HTML to extract and clean the data.
                 let cleaned_title = title
                     .attr("aria-label")
                     .unwrap_or("No Title Found")
                     .trim()
                     .to_owned();
-                let raw_url = url
-                    .value()
-                    .attr("href")
-                    .unwrap_or("No Link Found");
-                
+
+                let raw_url = url.value().attr("href").unwrap_or("No Link Found");
                 let cleaned_url = parse_yahoo_redirect_url(raw_url);
 
                 let cleaned_description = desc.inner_html().trim().to_owned();
+
                 Some(SearchResult::new(
                     &cleaned_title,
                     &cleaned_url,
@@ -186,5 +182,6 @@ impl SearchEngine for Yahoo {
                     &["yahoo"],
                 ))
             })
+            .change_context(EngineError::UnexpectedError)
     }
 }
