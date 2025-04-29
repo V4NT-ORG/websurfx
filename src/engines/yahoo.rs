@@ -79,7 +79,8 @@ fn parse_yahoo_redirect_url(raw_url: &str) -> String {
     }
 }
 /// Perform a percent-decoding using only the Rust standard library.
-fn percent_decode(input: &[u8]) -> Result<String, std::string::FromUtf8Error> {
+
+fn percent_decode(input: &[u8]) -> Result<String, error_stack::Report<std::string::FromUtf8Error>> {
     let mut output = Vec::with_capacity(input.len());
     let mut i = 0;
 
@@ -102,8 +103,10 @@ fn percent_decode(input: &[u8]) -> Result<String, std::string::FromUtf8Error> {
         }
     }
 
-    String::from_utf8(output)
+    // Wrap the FromUtf8Error into a Report if there is an error
+    String::from_utf8(output).map_err(|e| Report::new(e))
 }
+
 
 /// Convert a single ASCII hex character to its value.
 fn from_hex(byte: u8) -> Option<u8> {
