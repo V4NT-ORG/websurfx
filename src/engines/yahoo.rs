@@ -5,8 +5,8 @@ use error_stack::{Report, Result as StackResult, ResultExt};
 
 use std::collections::HashMap;
 
-use reqwest::header::HeaderMap;
 use reqwest::Client;
+use reqwest::header::HeaderMap;
 use scraper::Html;
 
 use crate::models::aggregation::SearchResult;
