@@ -14,8 +14,6 @@ use crate::models::engine::{EngineError, SearchEngine};
 
 use super::search_result_parser::SearchResultParser;
 
-// Removed unused import: std::string::FromUtf8Error
-
 /// A new Yahoo engine type defined in-order to implement the `SearchEngine` trait which allows to
 /// reduce code duplication as well as allows to create vector of different search engines easily.
 pub struct Yahoo {
@@ -54,7 +52,7 @@ impl Yahoo {
     //     Ok(final_url)
     // }
 }
-
+/// Parses the Yahoo redirect URL and extracts the actual target URL.
 fn parse_yahoo_redirect_url(raw_url: &str) -> String {
     // Look for the /RU= marker
     if let Some(start_idx) = raw_url.find("/RU=") {
@@ -80,7 +78,6 @@ fn parse_yahoo_redirect_url(raw_url: &str) -> String {
 
 /// Perform a percent-decoding using only the Rust standard library.
 // use error_stack::{Report, Result};
-
 /// Perform percent-decoding using only the Rust standard library
 fn percent_decode(input: &[u8]) -> Result<String, Report<FromUtf8Error>> {
     let mut output = Vec::with_capacity(input.len());
